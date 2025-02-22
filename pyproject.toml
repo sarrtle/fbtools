@@ -16,3 +16,6 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
+
+[tool.basedpyright]
+reportUnusedCallResult = false
