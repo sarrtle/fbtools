@@ -5,5 +5,14 @@ description = "A tool for facebook automation for both official and unofficial."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "fastapi>=0.115.8",
     "httpx>=0.28.1",
+    "uvicorn>=0.34.0",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.4",
+]
+
+[tool.pytest.ini_options]
