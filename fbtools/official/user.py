@@ -1,5 +1,6 @@
 """User object Facebook of node."""
 
+from typing import Literal
 from httpx import AsyncClient
 
 from fbtools.official.exceptions import (
@@ -7,7 +8,10 @@ from fbtools.official.exceptions import (
     LoginError,
     UserValidationError,
 )
+from fbtools.official.models.validation.page_response import PageResponse
 from fbtools.utilities.fbauthflow import FacebookAuthFlow
+
+from fbtools.official.page import Page
 
 
 class User:
@@ -16,14 +20,21 @@ class User:
     All user related APIs will be here.
 
     Attributes:
+        user_id: The user id or "me". The "me" is used on dev mode.
         access_token: The user access token created from facebook developer tools.
-        session: An asynchronous httpx session.
+        session: An asynchronous httpx session of this node.
 
     """
 
-    def __init__(self):
-        """Initialize User."""
+    def __init__(self, user_id: str | Literal["me"] = "me"):
+        """Initialize User.
+
+        Args:
+            user_id: The user id or "me". The "me" is used on dev mode.
+
+        """
         # attributes
+        self.user_id: str = user_id if user_id != "me" else "me"
         self.access_token: str | None = None
 
         # objects
@@ -48,14 +59,14 @@ class User:
             # short name is for the user only, page validation will be on
             # another method.
             params = {"access_token": user_access_token, "fields": "short_name"}
-            response = await self.session.get("me", params=params)
+            response = await self.session.get(self.user_id, params=params)
 
             if response.status_code != 200:
                 raise LoginError(error_type=UserValidationError(response.text))
 
         self.access_token = user_access_token
 
-    async def generate_access_token(self, client_id: str, client_secret: str):
+    async def generate_access_token(self, client_id: str, client_secret: str) -> None:
         """Will automatically generate user access token using Facebook Login.
 
         Opens a browser and connect to your app, then generate the access token.
@@ -79,4 +90,44 @@ class User:
         except RuntimeError as e:
             raise LoginError(error_type=GenerateUserAccessTokenError(str(e)))
 
-        return token
+        self.access_token = token
+        print("Generated access token:", self.access_token)
+
+    def save_user_access_token(
+        self, user_access_token: str, filepath: str = "access_token.txt"
+    ) -> None:
+        """Save user access token to local file.
+
+        Args:
+            user_access_token: The user access token created from facebook login.
+            filepath: The file path to save the access token. Default on root folder.
+
+        """
+        with open(filepath, "w") as f:
+            f.write(user_access_token)
+
+    async def get_pages(self) -> list[Page]:
+        """Show pages available from the user.
+
+        Returns:
+            A list of Page node.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+
+        """
+        # to return
+        pages: list[Page] = []
+
+        # request page data from official api
+        params = {"access_token": self.access_token}
+        response = await self.session.get(f"{self.user_id}/accounts", params=params)
+
+        # validate data
+        page_response = PageResponse.model_validate(response.json())
+
+        # add data to Page node
+        for page in page_response.data:
+            pages.append(Page(page_data_item=page))
+
+        return pages

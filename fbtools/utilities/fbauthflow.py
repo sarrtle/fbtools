@@ -62,8 +62,11 @@ async def get_access_token_from_callback(
             },
         )
         response.raise_for_status()
-        access_token: str = response.json()["access_token"]
+        response_data: dict[str, str] = response.json()
+        access_token: str = response_data["access_token"]
+        expiration: str = response_data["expires_in"]
         to_return["access_token"] = access_token
+        to_return["expires_in"] = expiration
 
     return to_return
 
