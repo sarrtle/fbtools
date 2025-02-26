@@ -10,7 +10,6 @@ class PageDataItem(BaseModel):
     access_token: str
     category: str
     name: str
-    tasks: list[str]
     id: str
 
 
