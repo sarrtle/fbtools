@@ -7,11 +7,13 @@ from pydantic import BaseModel
 import uvicorn
 import httpx
 
+from fbtools.official.models.response.fbauthflow import FbAuthResponse
+
 
 # reusable and importable methods
 async def get_access_token_from_callback(
     request: Request, client_id: str, client_secret: str, callback_function_name: str
-) -> dict[str, str]:
+) -> FbAuthResponse:
     """Will preprocess from the callback url of Facebook authentication flow.
 
     This will be use inside api route handler.
@@ -23,9 +25,7 @@ async def get_access_token_from_callback(
         callback_function_name: The name of the callback function used in your server.
 
     Returns:
-        Dictionary of access_token and message. May return
-        empty access_token if failed and you can check the
-        message.
+        FbAuthResponse object with this data: access_token, message
 
     Raises:
         HttpxError: If the request fails.
@@ -33,22 +33,15 @@ async def get_access_token_from_callback(
 
     """
     # to return
-    to_return: dict[str, str] = {
-        "access_token": "",
-        "message": "",
-    }
+    to_return = FbAuthResponse(access_token="", message="")
 
     # Process successful callback
     code = request.query_params.get("code", "")
 
     # Handle potential errors
     if not code:
-        to_return["message"] = (
-            "No code found in query params. Facebook might changed something or you used 'token' instead of 'code' as response_type."
-        )
+        to_return.message = "No code found in query params. Facebook might changed something or you used 'token' instead of 'code' as response_type."
         return to_return
-
-    to_return["code"] = code
 
     # Exchange code for access token
     async with httpx.AsyncClient() as client:
@@ -64,9 +57,7 @@ async def get_access_token_from_callback(
         response.raise_for_status()
         response_data: dict[str, str] = response.json()
         access_token: str = response_data["access_token"]
-        expiration: str = response_data["expires_in"]
-        to_return["access_token"] = access_token
-        to_return["expires_in"] = expiration
+        to_return.access_token = access_token
 
     return to_return
 
@@ -146,7 +137,7 @@ class FacebookAuthFlow:
                 callback_function_name="handle_local_callback",
             )
 
-            access_token = response_data["access_token"]
+            access_token = response_data.access_token
 
             if not access_token:
                 self._shutdown()
