@@ -12,89 +12,6 @@ subscription field for Instagram Messaging.
 from pydantic import BaseModel, Field
 
 
-class _Sender(BaseModel):
-    """Sender id.
-
-    Attributes:
-        id: The id of the sender.
-
-    """
-
-    id: str
-
-
-class _Recipient(BaseModel):
-    """Recipient id.
-
-    Attributes:
-        id: The id of the page.
-
-    """
-
-    id: str
-
-
-class _QuickReply(BaseModel):
-    """Quick reply.
-
-    Attributes:
-        payload: The payload of the quick reply.
-
-    """
-
-    payload: str
-
-
-class _ReplyTo(BaseModel):
-    """Reply to.
-
-    Attributes:
-        id: The id of the message it was replying to.
-
-    """
-
-    mid: str
-
-
-class _Message(BaseModel):
-    """Message.
-
-    Contains the message object data.
-
-    Attributes:
-        mid: The message id of the message.
-        text: The text of the message.
-        reply_to: The reply to message that contains message id.
-        quick_reply: The quick reply of the message that contains payload data.
-
-    """
-
-    mid: str
-    text: str
-    reply_to: _ReplyTo | None
-    quick_reply: _QuickReply | None
-
-
-class _Messaging(BaseModel):
-    """Messaging field data.
-
-    This is data of a dictionary, embodies the
-    messages field data.
-
-    Attributes:
-        sender: The sender of the message.
-        recipient: The reciepient of the message.
-        timestamp: The timestamp of the message.
-        message: The message object data.
-
-    """
-
-    sender: _Sender
-    recipient: _Recipient
-    timestamp: int
-    message: _Message
-
-
 class Message(BaseModel):
     """Messages field data.
 
@@ -110,4 +27,90 @@ class Message(BaseModel):
 
     time: int
     id: str
-    messages: list[_Messaging] = Field(..., alias="messaging")
+    messages: list["MessageObject"] = Field(..., alias="messaging")
+
+
+class MessageObject(BaseModel):
+    """Messaging field data.
+
+    This is data of a dictionary, embodies the
+    messages field data.
+
+    Attributes:
+        sender: The sender of the message.
+        recipient: The reciepient of the message.
+        timestamp: The timestamp of the message.
+        message: The message object data.
+
+    """
+
+    sender: "Sender"
+    recipient: "Recipient"
+    timestamp: int
+    message: "MessageContent"
+
+
+class Sender(BaseModel):
+    """Sender id.
+
+    Attributes:
+        id: The id of the sender.
+
+    """
+
+    id: str
+
+
+class Recipient(BaseModel):
+    """Recipient id.
+
+    Attributes:
+        id: The id of the page.
+
+    """
+
+    id: str
+
+
+class MessageContent(BaseModel):
+    """Message.
+
+    Contains the message object data.
+
+    Attributes:
+        mid: The message id of the message.
+        text: The text of the message.
+        reply_to: The reply to message that contains message id.
+        quick_reply: The quick reply of the message that contains payload data.
+
+    """
+
+    mid: str
+    text: str
+    reply_to: "ReplyTo | None"
+    quick_reply: "QuickReply | None"
+
+
+class QuickReply(BaseModel):
+    """Quick reply.
+
+    Attributes:
+        payload: The payload of the quick reply.
+
+    """
+
+    payload: str
+
+
+class ReplyTo(BaseModel):
+    """Reply to.
+
+    Attributes:
+        id: The id of the message it was replying to.
+
+    """
+
+    mid: str
+
+
+Message.model_rebuild()
