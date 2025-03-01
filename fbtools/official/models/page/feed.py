@@ -8,11 +8,8 @@ Notes:
         4. FeedNewPostWithManyPhotos
         5. FeedNewPostWithVideo
         6. FeedComment
-        7. FeedCommentReply
-        8. FeedCommentWithPhoto
-        9. FeedCommentWithVideo
-        10. FeedCommentReplyWithPhoto
-        11. FeedCommentReplyWithVideo
+        7. FeedCommentWithPhoto
+        8. FeedCommentWithVideo
 
 Notes:
     on feed comment:
@@ -80,9 +77,8 @@ class FeedValueType(BaseModel):
         | FeedNewPostWithPhoto
         | FeedNewPostWithManyPhotos
         | FeedComment
-        | FeedCommentReply
         | FeedCommentWithPhoto
-        | FeedCommentReplyWithPhoto
+        | FeedCommentWithVideo
     )"""
 
 
@@ -195,6 +191,7 @@ class FeedComment(BaseModel):
         item: What type of feed is it. Either comment, status or a photo.
         parent_id: The id of the post or the parent comment.
         verb: The action of the feed.
+        is_reply: Whether the comment is a reply or not.
 
     """
 
@@ -208,48 +205,13 @@ class FeedComment(BaseModel):
     parent_id: str
     verb: Literal["add", "edited"]
 
-    @model_validator(mode="before")
-    def _check_if_top_level_comment(cls, values: dict[str, str]):
-        # for top level comment, parent_id is the same as post_id
-        if values.get("parent_id") != values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    is_reply: bool = False
 
-
-class FeedCommentReply(BaseModel):
-    """Comment Feed data.
-
-    When the page, or other users commented on your post.
-
-    Attributes:
-        from: The sender of the comment.
-        post: The data of the post where the comment was made.
-        message: The message of the comment.
-        post_id: The id of the post.
-        comment_id: The id of the comment.
-        created_time: The time of the comment creation in timestamp format.
-        item: What type of feed is it. Either comment, status or a photo.
-        parent_id: The id of the post or the parent comment.
-        verb: The action of the feed.
-
-    """
-
-    from_: "FeedFrom" = Field(..., alias="from")
-    post: "FeedPostData"
-    message: str
-    post_id: str
-    comment_id: str
-    created_time: int
-    item: Literal["comment"]
-    parent_id: str
-    verb: Literal["add", "edited"]
-
-    @model_validator(mode="before")
-    def _check_if_reply_comment(cls, values: dict[str, str]):
-        # for a reply comment, parent_id must be differ as post_id
-        if values.get("parent_id") == values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    @model_validator(mode="after")
+    def _check_if_top_level_comment(self):
+        # for reply comment, parent_id is not the same as post_id
+        self.is_reply = self.parent_id != self.post_id
+        return self
 
 
 class FeedCommentWithPhoto(BaseModel):
@@ -268,6 +230,7 @@ class FeedCommentWithPhoto(BaseModel):
         item: What type of feed is it. Either comment, status or a photo.
         parent_id: The id of the post or the parent comment.
         verb: The action of the feed.
+        is_reply: Whether the comment is a reply or not.
 
     """
 
@@ -282,50 +245,13 @@ class FeedCommentWithPhoto(BaseModel):
     parent_id: str
     verb: Literal["add", "edited"]
 
-    @model_validator(mode="before")
-    def _check_if_top_level_comment(cls, values: dict[str, str]):
-        # for top level comment, parent_id is the same as post_id
-        if values.get("parent_id") != values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    is_reply: bool = False
 
-
-class FeedCommentReplyWithPhoto(BaseModel):
-    """Comment Feed data.
-
-    When the page, or other users commented on your post.
-
-    Attributes:
-        from: The sender of the comment.
-        post: The data of the post where the comment was made.
-        message: The content of the comment.
-        photo: The url of the image of the comment
-        post_id: The id of the post.
-        comment_id: The id of the comment.
-        created_time: The time of the comment creation in timestamp format.
-        item: What type of feed is it. Either comment, status or a photo.
-        parent_id: The id of the post or the parent comment.
-        verb: The action of the feed.
-
-    """
-
-    from_: "FeedFrom" = Field(..., alias="from")
-    post: "FeedPostData"
-    message: str | None
-    photo: str
-    post_id: str
-    comment_id: str
-    created_time: int
-    item: Literal["comment"]
-    parent_id: str
-    verb: Literal["add", "edited"]
-
-    @model_validator(mode="before")
-    def _check_if_reply_comment(cls, values: dict[str, str]):
-        # for a reply comment, parent_id must be differ as post_id
-        if values.get("parent_id") == values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    @model_validator(mode="after")
+    def _check_if_top_level_comment(self):
+        # for reply comment, parent_id is not the same as post_id
+        self.is_reply = self.parent_id != self.post_id
+        return self
 
 
 class FeedCommentWithVideo(BaseModel):
@@ -344,6 +270,7 @@ class FeedCommentWithVideo(BaseModel):
         item: What type of feed is it. Either comment, status or a photo.
         parent_id: The id of the post or the parent comment.
         verb: The action of the feed.
+        is_reply: Whether the comment is a reply or not.
 
     """
 
@@ -358,50 +285,13 @@ class FeedCommentWithVideo(BaseModel):
     parent_id: str
     verb: Literal["add", "edited"]
 
-    @model_validator(mode="before")
-    def _check_if_top_level_comment(cls, values: dict[str, str]):
-        # for top level comment, parent_id is the same as post_id
-        if values.get("parent_id") != values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    is_reply: bool = False
 
-
-class FeedCommentReplyWithVideo(BaseModel):
-    """Comment Feed data with video or gif.
-
-    When the page, or other users commented on your post.
-
-    Attributes:
-        from: The sender of the comment.
-        post: The data of the post where the comment was made.
-        message: The content of the comment.
-        video: The url of the video of the comment
-        post_id: The id of the post.
-        comment_id: The id of the comment.
-        created_time: The time of the comment creation in timestamp format.
-        item: What type of feed is it. Either comment, status or a photo.
-        parent_id: The id of the post or the parent comment.
-        verb: The action of the feed.
-
-    """
-
-    from_: "FeedFrom" = Field(..., alias="from")
-    post: "FeedPostData"
-    message: str | None
-    video: str
-    post_id: str
-    comment_id: str
-    created_time: int
-    item: Literal["comment"]
-    parent_id: str
-    verb: Literal["add", "edited"]
-
-    @model_validator(mode="before")
-    def _check_if_reply_comment(cls, values: dict[str, str]):
-        # for a reply comment, parent_id must be differ as post_id
-        if values.get("parent_id") == values.get("post_id"):
-            raise ValueError("not top level comment")
-        return values
+    @model_validator(mode="after")
+    def _check_if_reply_comment(self):
+        # for reply comment, parent_id is not the same as post_id
+        self.is_reply = self.parent_id != self.post_id
+        return self
 
 
 class FeedFrom(BaseModel):
