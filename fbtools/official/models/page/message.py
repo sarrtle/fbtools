@@ -9,6 +9,7 @@ sent a message since there is no separate message_echoes
 subscription field for Instagram Messaging.
 """
 
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -87,8 +88,32 @@ class MessageContent(BaseModel):
 
     mid: str
     text: str
+    attachments: "Attachments | None"
     reply_to: "ReplyTo | None"
     quick_reply: "QuickReply | None"
+
+
+class Attachments(BaseModel):
+    """Attachments.
+
+    Attributes:
+        payload: The payload of the attachment.
+
+    """
+
+    attachment_type: Literal["image", "video", "audio", "file", "reel", "ig_reel"]
+    payload: "AttachmentPayload"
+
+
+class AttachmentPayload(BaseModel):
+    """Attachment payload.
+
+    Attributes:
+        url: The url of the attachment.
+
+    """
+
+    url: str
 
 
 class QuickReply(BaseModel):
