@@ -15,7 +15,7 @@ Notes:
     on feed comment:
         - if comment has no text, the message will be None
         - the video and gif have the same variable `video` so gif
-            and video must be on FeedCommentWithVideo, FeedCommentReplyWithVideo
+            and video must be on FeedCommentWithVideo
         - There are some case that the video variable will not found even you
             commented with video or gif. It will automatically go to FeedComment.
 
@@ -47,22 +47,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 
-class Feed(BaseModel):
-    """Feed field data.
-
-    Attributes:
-        id: The id of the webhook.
-        time: The time webhook received.
-        changes: What kind of event happened.
-
-    """
-
-    id: str
-    time: int
-    changes: list["FeedValueType"]
-
-
-class FeedValueType(BaseModel):
+class FacebookFeed(BaseModel):
     """Type of the feed.
 
     Attributes:
@@ -323,4 +308,4 @@ class FeedPostData(BaseModel):
     id: str
 
 
-Feed.model_rebuild()
+FacebookFeed.model_rebuild()

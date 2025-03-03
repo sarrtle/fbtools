@@ -6,7 +6,7 @@ Sample data:
         {
             "id": "0",
             "time": 1740764080,
-            "changes": [
+            "changes": [ # Bio field starts here
                 {
                     "field": "bio"
                 }
@@ -25,11 +25,4 @@ class BioField(BaseModel):
     """Bio field data."""
 
     field: Literal["bio"]
-
-
-class Bio(BaseModel):
-    """Bio field data."""
-
-    id: str
-    time: int
-    changes: list[BioField]
+    value: None = None
