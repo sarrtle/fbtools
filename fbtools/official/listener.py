@@ -9,15 +9,19 @@ from fastapi import FastAPI, HTTPException, Query, Request, status
 
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi.responses import PlainTextResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, PlainTextResponse
 
 from fbtools.official.models.listener.webhoook_parameters import (
     WebhookParams,
 )
 
-from json import dumps
 
 import uvicorn
+
+from fbtools.official.models.page.page import Page
+
+import json
 
 
 class Listener:
@@ -29,10 +33,17 @@ class Listener:
         host: The host for the FastAPI server.
         port: The port for the FastAPI server.
 
+        debug_webhook: Enable disable debugging of webhoook payload.
+
     """
 
     def __init__(
-        self, verify_token: str, app: FastAPI | None, host: str, port: int
+        self,
+        verify_token: str,
+        app: FastAPI | None,
+        host: str,
+        port: int,
+        debug_webhook: bool = False,
     ) -> None:
         """Initialize Listener.
 
@@ -41,6 +52,7 @@ class Listener:
             app: The existing FastAPI app. Ignore if you are using listener as a standalone.
             host: The host for the FastAPI server.
             port: The port for the FastAPI server.
+            debug_webhook: Enable disable debugging of webhoook payload.
 
         """
         # attributes
@@ -48,6 +60,7 @@ class Listener:
         self.app: FastAPI = app or FastAPI()
         self.host: str = host
         self.port: int = port
+        self.debug_webhook: bool = debug_webhook
 
         # important private attributes
         self._callback: Callable[[], None] | None = None
@@ -77,20 +90,40 @@ class Listener:
             return PlainTextResponse(webhook_params.challenge)
 
         # handling events
+        async def handle_webhook_events(page_object: Page):
+            print(page_object.object)
+            print(page_object.entry)
+
+        # handling events
         # async def handle_webhook_events(payload: UserWebhookBody | PageWebhookBody):
         #     print(payload.object)
         #     raise NotImplementedError
 
-        async def handle_webhook_events(request: Request):
-            print(dumps(await request.json(), indent=4))
-            print()
-            print("---")
-            print()
+        # async def handle_webhook_events(request: Request):
+        #     print(dumps(await request.json(), indent=4))
+        #     print()
+        #     print("---")
+        #     print()
+
+        # handle error for debugging response
+        async def validation_exception_handler(request: Request, exc: Exception):
+            if isinstance(exc, RequestValidationError):
+                print("Invalid payload:")
+                print(json.dumps(await request.json(), indent=4))
+                print("---")
+
+                return JSONResponse(status_code=422, content={"detail": exc.errors()})
+            raise exc
 
         self.app.add_api_route("/webhook", endpoint=verify_webhook, methods=["GET"])
         self.app.add_api_route(
             "/webhook", endpoint=handle_webhook_events, methods=["POST"]
         )
+
+        if self.debug_webhook:
+            self.app.add_exception_handler(
+                RequestValidationError, validation_exception_handler
+            )
 
     def set_callback(self, callback: Callable[[], None]):
         """Set the callback function for the listener.

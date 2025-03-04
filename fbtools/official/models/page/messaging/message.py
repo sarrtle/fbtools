@@ -1,9 +1,9 @@
 """Messaging webhook object."""
 
-from pydantic import BaseModel, model_validator
+import json
+from pydantic import BaseModel, ValidationError, model_validator
 
 from fbtools.official.models.page.messaging.message_content import MessageContent
-from fbtools.official.models.page.messaging.message_echoes import MessageEchoContent
 from fbtools.official.models.page.messaging.message_edit import MessageEditContent
 from fbtools.official.models.page.messaging.message_optins import MessageOptinContent
 from fbtools.official.models.page.messaging.message_reaction import (
@@ -18,6 +18,17 @@ from fbtools.official.models.page.messaging.messaging_referral import (
 )
 from fbtools.official.models.page.messaging.models import Recipient, Sender
 
+# types of messages
+MessageTypes = (
+    MessageContent
+    | MessageEditContent
+    | MessageOptinContent
+    | MessageReactionContent
+    | MessageReadContent
+    | MessagingPostbackContent
+    | MessagingReferralContent
+)
+
 
 class Message(BaseModel):
     """Messaging data."""
@@ -25,39 +36,45 @@ class Message(BaseModel):
     sender: Sender
     recipient: Recipient
     timestamp: int
-    message_type: (
-        MessageContent
-        | MessageEchoContent
-        | MessageEditContent
-        | MessageOptinContent
-        | MessageReactionContent
-        | MessageReadContent
-        | MessagingPostbackContent
-        | MessagingReferralContent
-    )
+    message_type: MessageTypes
 
     @model_validator(mode="before")
-    def _validate_message_type(cls, data: dict[str, str]):
+    def _validate_message_type(cls, data: dict[str, str | MessageTypes]):
         """Validate message type.
 
         Dynamically determine message type base on the available data.
         """
-        message_types = [
-            "message",
-            "message_edit",
-            "optin",
-            "reaction",
-            "read",
-            "postback",
-            "referral",
-        ]
-        current_message_type = [name for name in message_types if name in data]
+        message_types = {
+            "message": MessageContent,
+            "message_edit": MessageEditContent,
+            "optin": MessageOptinContent,
+            "reaction": MessageReactionContent,
+            "read": MessageReadContent,
+            "postback": MessagingPostbackContent,
+            "referral": MessagingReferralContent,
+        }
+        current_message_type = [name for name in message_types.keys() if name in data]
+        print(current_message_type, data)
         if len(current_message_type) != 1:
             raise ValueError(
                 f"Expected one of {message_types} but got {current_message_type}"
             )
 
         field_name = current_message_type[0]
-        data["message_type"] = data.pop(field_name)
+        field_data = data.pop(field_name)
+
+        # validating here to see if there is a problem
+        # of the data not matching the models
+        try:
+            model = message_types[field_name].model_validate(field_data)
+        except ValidationError:
+            print(
+                f"ERROR on validating data for message_type: {field_name} on this data: {json.dumps(field_data, indent=4)}"
+            )
+            raise ValueError(
+                f"Expected one of {message_types} but got {current_message_type}"
+            )
+
+        data["message_type"] = model
 
         return data

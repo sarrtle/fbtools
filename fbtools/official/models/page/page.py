@@ -1,6 +1,6 @@
 """The base page object to all fields."""
 
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
 from fbtools.official.models.page.feeds.bio import BioField
@@ -11,7 +11,10 @@ from fbtools.official.models.page.feeds.picture import PictureField
 from fbtools.official.models.page.messaging.message import Message
 
 # types of feeds
-FeedTypes = BioField | FacebookFeed | MentionField | NameField | PictureField
+FeedTypes = Annotated[
+    BioField | FacebookFeed | MentionField | NameField | PictureField,
+    Field(..., discriminator="field"),
+]
 
 
 class Page(BaseModel):
@@ -38,7 +41,7 @@ class PageEntry(BaseModel):
 
     id: str
     time: int
-    changes: list[FeedTypes] = Field(..., discriminator="field")
+    changes: list[FeedTypes]
 
 
 class MessageEntry(BaseModel):

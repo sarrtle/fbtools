@@ -9,4 +9,4 @@ from pydantic import BaseModel
 class MessageReadContent(BaseModel):
     """Message read data."""
 
-    watermark: str
+    watermark: int

@@ -20,5 +20,5 @@ class MessageReactionContent(BaseModel):
 
     mid: str
     action: Literal["react", "unreact"]
-    emoji: str | None
-    reaction: str | None
+    emoji: str | None = None
+    reaction: str | None = None

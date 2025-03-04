@@ -11,3 +11,4 @@ class MessageEditContent(BaseModel):
 
     mid: str
     text: str
+    num_edit: int

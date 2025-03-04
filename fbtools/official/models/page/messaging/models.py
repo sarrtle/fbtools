@@ -1,7 +1,7 @@
 """Reusable and importable models for messaging."""
 
+from typing import Literal
 from pydantic import BaseModel
-
 
 
 class Sender(BaseModel):
@@ -16,10 +16,18 @@ class Recipient(BaseModel):
     id: str
 
 
+class AttachmentPayload(BaseModel):
+    """Payload for the attachment."""
+
+    url: str
+    title: str
+
+
 class Attachment(BaseModel):
     """Attachment payload data."""
 
-    url: str
+    type: Literal["image", "audio", "video", "file", "fallback"]
+    payload: AttachmentPayload
 
 
 class QuickReply(BaseModel):
