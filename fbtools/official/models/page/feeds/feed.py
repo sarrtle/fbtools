@@ -97,7 +97,7 @@ class FeedNewPostWithPhoto(BaseModel):
 
     from_: "FeedFrom" = Field(..., alias="from")
     link: str
-    message: str
+    message: str | None = None
     post_id: str
     created_time: int
     item: Literal["photo"]
@@ -126,7 +126,7 @@ class FeedNewPostWithManyPhotos(BaseModel):
 
     from_: "FeedFrom" = Field(..., alias="from")
     link: str
-    message: str
+    message: str | None = None
     photos: list[str]
     post_id: str
     created_time: int
@@ -195,6 +195,7 @@ class FeedComment(BaseModel):
     @model_validator(mode="after")
     def _check_if_top_level_comment(self):
         # for reply comment, parent_id is not the same as post_id
+        print(self.parent_id, self.post_id, self.parent_id != self.post_id)
         self.is_reply = self.parent_id != self.post_id
         return self
 
@@ -300,11 +301,11 @@ class FeedPostData(BaseModel):
 
     """
 
-    status_type: Literal["mobile_status_update"]
+    status_type: Literal["mobile_status_update", "added_photos", "added_video"]
     is_published: bool
     updated_time: datetime
     permalink_url: str
-    promotion_status: Literal["inactive"]
+    promotion_status: Literal["inactive", "ineligible"]
     id: str
 
 

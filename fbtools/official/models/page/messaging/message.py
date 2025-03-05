@@ -54,7 +54,7 @@ class Message(BaseModel):
             "referral": MessagingReferralContent,
         }
         current_message_type = [name for name in message_types.keys() if name in data]
-        print(current_message_type, data)
+        # print(current_message_type, data)
         if len(current_message_type) != 1:
             raise ValueError(
                 f"Expected one of {message_types} but got {current_message_type}"
