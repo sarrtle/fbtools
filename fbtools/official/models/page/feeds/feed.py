@@ -194,9 +194,15 @@ class FeedComment(BaseModel):
 
     @model_validator(mode="after")
     def _check_if_top_level_comment(self):
-        # for reply comment, parent_id is not the same as post_id
-        print(self.parent_id, self.post_id, self.parent_id != self.post_id)
-        self.is_reply = self.parent_id != self.post_id
+        # for reply comment, parent_id will hold the id of the parent comment
+        # parent comment will use the second id of the post id after underscore `"_"`
+        # to the first id of its own and the second id is the comment id after
+        # underscore '"_"`
+
+        unique_post_id = self.post_id.split("_")[1]
+        is_parent_id_comment = self.parent_id.split("_")[0] == unique_post_id
+
+        self.is_reply = is_parent_id_comment
         return self
 
 
@@ -235,8 +241,15 @@ class FeedCommentWithPhoto(BaseModel):
 
     @model_validator(mode="after")
     def _check_if_top_level_comment(self):
-        # for reply comment, parent_id is not the same as post_id
-        self.is_reply = self.parent_id != self.post_id
+        # for reply comment, parent_id will hold the id of the parent comment
+        # parent comment will use the second id of the post id after underscore `"_"`
+        # to the first id of its own and the second id is the comment id after
+        # underscore '"_"`
+
+        unique_post_id = self.post_id.split("_")[1]
+        is_parent_id_comment = self.parent_id.split("_")[0] == unique_post_id
+
+        self.is_reply = is_parent_id_comment
         return self
 
 
@@ -274,9 +287,16 @@ class FeedCommentWithVideo(BaseModel):
     is_reply: bool = False
 
     @model_validator(mode="after")
-    def _check_if_reply_comment(self):
-        # for reply comment, parent_id is not the same as post_id
-        self.is_reply = self.parent_id != self.post_id
+    def _check_if_top_level_comment(self):
+        # for reply comment, parent_id will hold the id of the parent comment
+        # parent comment will use the second id of the post id after underscore `"_"`
+        # to the first id of its own and the second id is the comment id after
+        # underscore '"_"`
+
+        unique_post_id = self.post_id.split("_")[1]
+        is_parent_id_comment = self.parent_id.split("_")[0] == unique_post_id
+
+        self.is_reply = is_parent_id_comment
         return self
 
 

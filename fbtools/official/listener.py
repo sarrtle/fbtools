@@ -4,6 +4,7 @@ Webhook events are those from messenger, page events and even
 user events that are connected or used your apps.
 """
 
+from hashlib import blake2b
 from typing import Annotated, Callable
 from fastapi import FastAPI, HTTPException, Query, Request, status
 
@@ -19,9 +20,12 @@ from fbtools.official.models.listener.webhoook_parameters import (
 
 import uvicorn
 
-from fbtools.official.models.page.page import Page
+from fbtools.official.models.page.feeds.feed import FeedNewPostWithPhoto
+from fbtools.official.models.page.page import Page, PageEntry
 
 import json
+
+from cachetools import FIFOCache
 
 
 class Listener:
@@ -32,6 +36,7 @@ class Listener:
         app: The existing FastAPI app. Ignore if you are using listener as a standalone.
         host: The host for the FastAPI server.
         port: The port for the FastAPI server.
+        cache: The cache for webhook events.
 
         debug_webhook: Enable disable debugging of webhoook payload.
 
@@ -61,6 +66,7 @@ class Listener:
         self.host: str = host
         self.port: int = port
         self.debug_webhook: bool = debug_webhook
+        self.cache: FIFOCache[str, bool] = FIFOCache(maxsize=1024)
 
         # important private attributes
         self._callback: Callable[[], None] | None = None
@@ -90,9 +96,43 @@ class Listener:
             return PlainTextResponse(webhook_params.challenge)
 
         # handling events
-        async def handle_webhook_events(page_object: Page):
+        async def handle_webhook_events(page_object: Page, request: Request):
+
+            # handle edited event for profile picture when
+            # someone is commenting to the profile picture post
+            # the webhook keeps sending edited event with no changes
+            # unless it is a `link`
+            if page_object.object == "page":
+                entry_type = page_object.entry[0]
+                if isinstance(entry_type, PageEntry):
+                    feed_model = entry_type.changes[0].value
+                    if (
+                        isinstance(feed_model, FeedNewPostWithPhoto)
+                        and feed_model.verb == "edited"
+                    ):
+                        data = feed_model.model_dump()
+                        # remove the link url since that is the major
+                        # changes of this webhook event that sends verb:edited
+                        # update
+                        del data["link"]
+
+                        # remove the `from_` to validate only the new
+                        # recent changes
+                        del data["from_"]
+
+                        # convert data to string and create hash key
+                        data = json.dumps(data)
+                        key = blake2b(
+                            data.encode(encoding="utf-8"), digest_size=16
+                        ).hexdigest()
+                        if self.cache.get(key):
+                            return
+                        self.cache[key] = True
+
             print(page_object.object)
             print(page_object.entry)
+            # print("--- RAW DATA ---")
+            # print(json.dumps(await request.json(), indent=4))
 
         # handling events
         # async def handle_webhook_events(payload: UserWebhookBody | PageWebhookBody):
