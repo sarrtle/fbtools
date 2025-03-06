@@ -46,6 +46,11 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
+# reusable types
+REACTION_TYPES = Literal["like", "love", "wow", "care", "haha", "sad", "angry"]
+REACTION_VERB_TYPES = Literal["add", "remove", "edit"]
+FEED_VERB_TYPES = Literal["add", "edited", "remove"]
+
 
 class FacebookFeed(BaseModel):
     """Type of the feed.
@@ -58,13 +63,40 @@ class FacebookFeed(BaseModel):
 
     field: Literal["feed"]
     value: """(
-        FeedNewPost
+        FeedNewReactionOnPost
+        | FeedNewReactionOnComment
+        | FeedNewPost
         | FeedNewPostWithPhoto
         | FeedNewPostWithManyPhotos
         | FeedComment
         | FeedCommentWithPhoto
         | FeedCommentWithVideo
     )"""
+
+
+class FeedNewReactionOnPost(BaseModel):
+    """When someone react on your post."""
+
+    from_: "FeedFrom" = Field(..., alias="from")
+    post_id: str
+    created_time: int
+    item: Literal["reaction"]
+    parent_id: str
+    reaction_type: REACTION_TYPES
+    verb: REACTION_VERB_TYPES
+
+
+class FeedNewReactionOnComment(BaseModel):
+    """When someone react on your post."""
+
+    from_: "FeedFrom" = Field(..., alias="from")
+    post_id: str
+    comment_id: str
+    created_time: int
+    item: Literal["reaction"]
+    parent_id: str
+    reaction_type: REACTION_TYPES
+    verb: REACTION_VERB_TYPES
 
 
 class FeedNewPost(BaseModel):
@@ -76,7 +108,7 @@ class FeedNewPost(BaseModel):
     created_time: int
     item: Literal["status"]
     published: int
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
 
 class FeedNewPostWithPhoto(BaseModel):
@@ -103,7 +135,7 @@ class FeedNewPostWithPhoto(BaseModel):
     item: Literal["photo"]
     photo_id: str
     published: int
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
 
 class FeedNewPostWithManyPhotos(BaseModel):
@@ -132,7 +164,7 @@ class FeedNewPostWithManyPhotos(BaseModel):
     created_time: int
     item: Literal["status"]
     published: int
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
 
 class FeedNewPostWithVideo(BaseModel):
@@ -157,7 +189,7 @@ class FeedNewPostWithVideo(BaseModel):
     created_time: int
     item: Literal["video"]
     published: int
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
     video_id: str
 
 
@@ -188,7 +220,7 @@ class FeedComment(BaseModel):
     created_time: int
     item: Literal["comment"]
     parent_id: str
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
     is_reply: bool = False
 
@@ -235,7 +267,7 @@ class FeedCommentWithPhoto(BaseModel):
     created_time: int
     item: Literal["comment"]
     parent_id: str
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
     is_reply: bool = False
 
@@ -282,7 +314,7 @@ class FeedCommentWithVideo(BaseModel):
     created_time: int
     item: Literal["comment"]
     parent_id: str
-    verb: Literal["add", "edited"]
+    verb: FEED_VERB_TYPES
 
     is_reply: bool = False
 
