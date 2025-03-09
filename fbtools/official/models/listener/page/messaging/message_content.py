@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel
 
-from fbtools.official.models.page.messaging.models import (
+from fbtools.official.models.listener.page.messaging.models import (
     Attachment,
     QuickReply,
     ReplyTo,

@@ -3,20 +3,28 @@
 import json
 from pydantic import BaseModel, ValidationError, model_validator
 
-from fbtools.official.models.page.messaging.message_content import MessageContent
-from fbtools.official.models.page.messaging.message_edit import MessageEditContent
-from fbtools.official.models.page.messaging.message_optins import MessageOptinContent
-from fbtools.official.models.page.messaging.message_reaction import (
+from fbtools.official.models.listener.page.messaging.message_content import (
+    MessageContent,
+)
+from fbtools.official.models.listener.page.messaging.message_edit import (
+    MessageEditContent,
+)
+from fbtools.official.models.listener.page.messaging.message_optins import (
+    MessageOptinContent,
+)
+from fbtools.official.models.listener.page.messaging.message_reaction import (
     MessageReactionContent,
 )
-from fbtools.official.models.page.messaging.message_read import MessageReadContent
-from fbtools.official.models.page.messaging.messaging_postback import (
+from fbtools.official.models.listener.page.messaging.message_read import (
+    MessageReadContent,
+)
+from fbtools.official.models.listener.page.messaging.messaging_postback import (
     MessagingPostbackContent,
 )
-from fbtools.official.models.page.messaging.messaging_referral import (
+from fbtools.official.models.listener.page.messaging.messaging_referral import (
     MessagingReferralContent,
 )
-from fbtools.official.models.page.messaging.models import Recipient, Sender
+from fbtools.official.models.listener.page.messaging.models import Recipient, Sender
 
 # types of messages
 MessageTypes = (

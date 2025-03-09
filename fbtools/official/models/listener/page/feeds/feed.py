@@ -1,17 +1,6 @@
 """Feed field webhook.
 
 Notes:
-    Available to import:
-        1. Feed
-        2. FeedNewPost
-        3. FeedNewPostWithPhoto
-        4. FeedNewPostWithManyPhotos
-        5. FeedNewPostWithVideo
-        6. FeedComment
-        7. FeedCommentWithPhoto
-        8. FeedCommentWithVideo
-
-Notes:
     on feed comment:
         - if comment has no text, the message will be None
         - the video and gif have the same variable `video` so gif

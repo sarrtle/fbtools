@@ -3,12 +3,12 @@
 from typing import Annotated, Literal
 from pydantic import BaseModel, Field
 
-from fbtools.official.models.page.feeds.bio import BioField
-from fbtools.official.models.page.feeds.feed import FacebookFeed
-from fbtools.official.models.page.feeds.mention import MentionField
-from fbtools.official.models.page.feeds.name import NameField
-from fbtools.official.models.page.feeds.picture import PictureField
-from fbtools.official.models.page.messaging.message import Message
+from fbtools.official.models.listener.page.feeds.bio import BioField
+from fbtools.official.models.listener.page.feeds.feed import FacebookFeed
+from fbtools.official.models.listener.page.feeds.mention import MentionField
+from fbtools.official.models.listener.page.feeds.name import NameField
+from fbtools.official.models.listener.page.feeds.picture import PictureField
+from fbtools.official.models.listener.page.messaging.message import Message
 
 # types of feeds
 FeedTypes = Annotated[
