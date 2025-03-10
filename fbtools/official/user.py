@@ -9,7 +9,7 @@ from fbtools.official.exceptions import (
     UserValidationError,
 )
 from fbtools.official.models.validation.page_response import PageResponse
-from fbtools.utilities.fbauthflow import FacebookAuthFlow
+from fbtools.official.utilities.fbauthflow import FacebookAuthFlow
 
 from fbtools.official.page import Page
 

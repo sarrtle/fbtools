@@ -1,10 +1,17 @@
 """Page object of Facebook node."""
 
+from os.path import exists
 from typing import Literal, override
 from httpx import AsyncClient
 
 from fbtools.official.exceptions import PageValidationError
+from fbtools.official.models.page.post import FacebookPost
+from fbtools.official.models.response.graph import FacebookPostResponse
 from fbtools.official.models.validation.page_response import PageDataItem
+
+from aiofiles import open as aopen
+
+from fbtools.official.utilities.common import create_url_format
 
 
 class Page:
@@ -33,6 +40,7 @@ class Page:
 
         # objects
         self.session: AsyncClient = self.create_session()
+        self._headers: dict[str, str] = {"Content-Type": "application/json"}
 
     @classmethod
     def create_session(cls):
@@ -104,6 +112,73 @@ class Page:
         """
         with open(filepath, "w") as f:
             f.write(page_access_token)
+
+    # ========== USEFUL METHODS ==========
+
+    async def create_photo_id(
+        self, photo_url_or_path: str, user_id: str | Literal["me"] = "me"
+    ):
+        """Upload photo to Facebook and get their photo id.
+
+        Args:
+            photo_url_or_path: The photo url or local path.
+            user_id: The user id or "me". The "me" is used on dev/solo mode.
+
+        Raises:
+            FileNotFoundError: If file does not exist.
+            Exception: If something went wrong when `id` was not found.
+
+        """
+        data = {}
+        if photo_url_or_path.startswith("http"):
+            data = {"url": photo_url_or_path}
+        else:
+            if exists(photo_url_or_path):
+                async with aopen(photo_url_or_path, "rb") as f:
+                    data = {"source": f}
+            else:
+                raise FileNotFoundError(f"File {photo_url_or_path} does not exist.")
+
+        params = {"access_token": self.access_token}
+        response = await self.session.post(
+            f"{user_id}/photos", data=data, params=params
+        )
+
+        response_data: dict[str, str] = response.json()
+
+        if "id" not in response_data:
+            # TODO: Make an exception for this
+            raise Exception(response.text)
+
+        return response_data["id"]
+
+    async def get_post_object(self, post_id: str) -> FacebookPost:
+        """Get post data and return as an object.
+
+        Args:
+            post_id: The id of the post.
+
+        Returns:
+            The FacebookPost object.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+
+        """
+        url = create_url_format(post_id)
+        params = {"access_token": self.access_token}
+        response = await self.session.get(url, params=params, headers=self._headers)
+
+        response_object = FacebookPostResponse.model_validate(response.json())
+
+        return FacebookPost(
+            post_id=response_object.id,
+            message=response_object.message,
+            status_type=response_object.status_type,
+            story=response_object.story,
+            created_time=response_object.created_time,
+            page_object=self,
+        )
 
     @override
     def __repr__(self):

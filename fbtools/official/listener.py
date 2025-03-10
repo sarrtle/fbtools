@@ -20,8 +20,8 @@ from fbtools.official.models.listener.webhoook_parameters import (
 
 import uvicorn
 
-from fbtools.official.models.page.feeds.feed import FeedNewPostWithPhoto
-from fbtools.official.models.page.page import Page, PageEntry
+from fbtools.official.models.listener.page.feeds.feed import FeedNewPostWithPhoto
+from fbtools.official.models.listener.page.page import Page, PageEntry
 
 import json
 
