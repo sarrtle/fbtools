@@ -7,12 +7,17 @@ Add post, edit post and delete post.
 """
 
 from datetime import datetime
-from typing import Literal, overload
+from typing import Literal
+
+from httpx import AsyncClient
 
 
+from fbtools.official.models.extra.attachments import Attachment
 from fbtools.official.models.response.graph import SuccessResponse
-from fbtools.official.page import Page
 from fbtools.official.utilities.common import create_url_format
+from fbtools.official.utilities.graph_util import (
+    create_page_photo_id,
+)
 
 
 class FacebookPost:
@@ -31,10 +36,22 @@ class FacebookPost:
         self,
         post_id: str,
         message: str | None,
-        status_type: Literal["added_photos", "added_video", "mobile_status_update"],
+        status_type: (
+            Literal[
+                "added_photos",
+                "added_video",
+                "added_reel",
+                "added_profile_photo",
+                "mobile_status_update",
+                "bio_status_update",
+            ]
+            | None
+        ),
         story: str | None,
+        attachments: list[Attachment] | None,
         created_time: datetime,
-        page_object: Page,
+        access_token: str,
+        session: AsyncClient,
     ):
         """Initialize FacebookPost.
 
@@ -44,17 +61,29 @@ class FacebookPost:
             status_type: Description of the type of a status update.
             story: Auto-generated stories (e.g., friend connections).
             created_time: The time the post was published, expressed as UNIX timestamp
-            page_object: The Page object
+            attachments: The attachments of the post.
+            access_token: The access token of the page.
+            session: The httpx async session.
 
         """
         self._post_id: str = post_id
         self._message: str | None = message
-        self._status_type: Literal[
-            "added_photos", "added_video", "mobile_status_update"
-        ] = status_type
+        self._status_type: (
+            Literal[
+                "added_photos",
+                "added_video",
+                "added_reel",
+                "added_profile_photo",
+                "mobile_status_update",
+                "bio_status_update",
+            ]
+            | None
+        ) = status_type
         self._story: str | None = story
+        self._attachments: list[Attachment] | None = attachments
         self._created_time: datetime = created_time
-        self._page_object: Page = page_object
+        self._access_token: str = access_token
+        self._session: AsyncClient = session
 
         # inner attributes for request
         self._headers: dict[str, str] = {"Content-Type": "application/json"}
@@ -62,28 +91,11 @@ class FacebookPost:
     # =============== USEFUL METHODS ===============
 
     # ===== UPDATING POST =====
-    @overload
     async def update_post(
         self,
         message: str,
         attachments: list[str] | None = None,
-        get_post_object: bool = True,
-    ) -> "FacebookPost": ...
-
-    @overload
-    async def update_post(
-        self,
-        message: str,
-        attachments: list[str] | None = None,
-        get_post_object: bool = False,
-    ) -> bool: ...
-
-    async def update_post(
-        self,
-        message: str,
-        attachments: list[str] | None = None,
-        get_post_object: bool = False,
-    ) -> "FacebookPost | bool":
+    ) -> bool:
         """Update the post.
 
         Args:
@@ -97,15 +109,17 @@ class FacebookPost:
         """
         url = create_url_format(self.post_id)
         data = {"message": message}
-        params = {"access_token": self._page_object.access_token}
-        session = self._page_object.session
+        params = {"access_token": self._access_token}
+        session = self._session
 
         if attachments:
             attached_media: list[dict[str, str]] = []
 
             for attachment in attachments:
-                photo_id = await self._page_object.create_photo_id(
-                    photo_url_or_path=attachment
+                photo_id = await create_page_photo_id(
+                    photo_url_or_path=attachment,
+                    access_token=self._access_token,
+                    session=session,
                 )
                 attached_media.append({"media_fbid": photo_id})
 
@@ -113,10 +127,6 @@ class FacebookPost:
             url=url, json=data, params=params, headers=self._headers
         )
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
-
-        # Get as post object
-        if get_post_object:
-            return await self._page_object.get_post_object(post_id=self.post_id)
 
         # return boolean
         return response_data.success
@@ -142,8 +152,10 @@ class FacebookPost:
         "_message",
         "_status_type",
         "_story",
+        "_attachments",
         "_created_time",
-        "_page_object",
+        "_access_token",
+        "_session",
         "_headers",
         "_url",
     }
@@ -161,7 +173,17 @@ class FacebookPost:
     @property
     def status_type(
         self,
-    ) -> Literal["added_photos", "added_video", "mobile_status_update"]:
+    ) -> (
+        Literal[
+            "added_photos",
+            "added_video",
+            "added_reel",
+            "added_profile_photo",
+            "mobile_status_update",
+            "bio_status_update",
+        ]
+        | None
+    ):
         """Get the status type of the post."""
         return self._status_type
 
@@ -169,6 +191,11 @@ class FacebookPost:
     def story(self) -> str | None:
         """Get the story of the post."""
         return self._story
+
+    @property
+    def attachments(self) -> list[Attachment] | None:
+        """Get the attachments of the post."""
+        return self._attachments
 
     @property
     def created_time(self) -> datetime:

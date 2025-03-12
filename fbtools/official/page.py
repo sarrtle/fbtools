@@ -1,17 +1,17 @@
 """Page object of Facebook node."""
 
-from os.path import exists
 from typing import Literal, override
 from httpx import AsyncClient
 
 from fbtools.official.exceptions import PageValidationError
+from fbtools.official.models.extra.attachments import Attachment
 from fbtools.official.models.page.post import FacebookPost
-from fbtools.official.models.response.graph import FacebookPostResponse
+from fbtools.official.models.response.facebook_post_response import FacebookPostResponse
 from fbtools.official.models.validation.page_response import PageDataItem
 
-from aiofiles import open as aopen
 
 from fbtools.official.utilities.common import create_url_format
+from fbtools.official.utilities.graph_util import create_page_photo_id
 
 
 class Page:
@@ -129,28 +129,12 @@ class Page:
             Exception: If something went wrong when `id` was not found.
 
         """
-        data = {}
-        if photo_url_or_path.startswith("http"):
-            data = {"url": photo_url_or_path}
-        else:
-            if exists(photo_url_or_path):
-                async with aopen(photo_url_or_path, "rb") as f:
-                    data = {"source": f}
-            else:
-                raise FileNotFoundError(f"File {photo_url_or_path} does not exist.")
-
-        params = {"access_token": self.access_token}
-        response = await self.session.post(
-            f"{user_id}/photos", data=data, params=params
+        return await create_page_photo_id(
+            photo_url_or_path=photo_url_or_path,
+            access_token=self.access_token,
+            session=self.session,
+            user_id=user_id,
         )
-
-        response_data: dict[str, str] = response.json()
-
-        if "id" not in response_data:
-            # TODO: Make an exception for this
-            raise Exception(response.text)
-
-        return response_data["id"]
 
     async def get_post_object(self, post_id: str) -> FacebookPost:
         """Get post data and return as an object.
@@ -166,10 +150,158 @@ class Page:
 
         """
         url = create_url_format(post_id)
-        params = {"access_token": self.access_token}
+        fields = [
+            "id",
+            "message",
+            "status_type",
+            "story",
+            "created_time",
+            "target",
+            "attachments.limit(10){media,description,type,title,subattachments,unshimmed_url,target}",
+        ]
+        params = {
+            "access_token": self.access_token,
+            "fields": ",".join(fields),
+        }
         response = await self.session.get(url, params=params, headers=self._headers)
 
         response_object = FacebookPostResponse.model_validate(response.json())
+
+        # check if the post is a bio
+        is_bio = False
+
+        # process attachments
+        attachments: list[Attachment] = []
+        if response_object.attachments:
+            attachment_data = response_object.attachments.data[0]
+
+            # for many multiple attachments
+            if attachment_data.subattachments:
+                for subattachments in attachment_data.subattachments.data:
+                    # what I need
+                    # attachment_id
+                    attachment_id = subattachments.target.id
+                    # src
+                    # multiple videos and images has similar
+                    # media properties `subattachment.media.image`
+
+                    # if video
+                    media_type = "video"
+                    if (
+                        subattachments.type == "video"
+                        and subattachments.media.source != None
+                    ):
+                        src = subattachments.media.source
+
+                    # if image
+                    elif subattachments.type == "photo":
+                        media_type = "image"
+                        src = subattachments.media.image.src
+
+                    else:
+                        raise Exception(f"Unknown media type: {subattachments.type}")
+
+                    # thumbnail_src
+                    # since image doesn't have a thumbnail, the src
+                    # is their real image but the video uses this as
+                    # their thumbnail image
+                    thumbnail_src = subattachments.media.image.src
+
+                    # facebook_url
+                    # The URL to facebook post that views the attachment.
+                    facebook_url = subattachments.target.url
+
+                    # description
+                    description = subattachments.description
+
+                    # height
+                    subattachments.media.image.height
+                    # width
+                    subattachments.media.image.width
+
+                    attachments.append(
+                        Attachment(
+                            attachment_id=attachment_id,
+                            src=src,
+                            thumbnail_src=thumbnail_src,
+                            facebook_url=facebook_url,
+                            description=description,
+                            height=subattachments.media.image.height,
+                            width=subattachments.media.image.width,
+                            media_type=media_type,
+                        )
+                    )
+
+            # if bio
+            # bio uses attachments too
+            elif attachment_data.type == "native_templates":
+                is_bio = True
+                # since bio don't have a message, it will use the
+                # attachment description
+                response_object.message = attachment_data.description
+
+            # if single attachment
+            else:
+
+                assert (
+                    attachment_data.media is not None
+                ), "Attachment media is None on single attachment."
+
+                attachment_id = attachment_data.target.id
+
+                # if video
+                media_type = "video"
+                if (
+                    attachment_data.type == "video_inline"
+                    and attachment_data.media.source != None
+                ):
+                    src = attachment_data.media.source
+
+                # if image
+                elif attachment_data.type in ["photo", "album", "profile_media"]:
+                    media_type = "image"
+                    src = attachment_data.media.image.src
+                else:
+                    raise Exception(f"Unknown Attachment type {attachment_data.type}.")
+
+                # if image_profile
+                if attachment_data.type == "profile_media":
+                    media_type = "image_profile"
+                    response_object.status_type = "added_profile_photo"
+
+                # if video reel
+                if "reel" in attachment_data.target.url:
+                    media_type = "video_reel"
+                    response_object.status_type = "added_reel"
+
+                # thumbnail_src
+                # since image doesn't have a thumbnail, the src
+                # is their real image but the video uses this as
+                # their thumbnail image
+                thumbnail_src = attachment_data.media.image.src
+
+                # facebook_url
+                # The URL to facebook post that views the attachment.
+                facebook_url = attachment_data.target.url
+
+                # description
+                description = attachment_data.description
+
+                attachments.append(
+                    Attachment(
+                        attachment_id=attachment_id,
+                        src=src,
+                        thumbnail_src=thumbnail_src,
+                        facebook_url=facebook_url,
+                        description=description,
+                        height=attachment_data.media.image.height,
+                        width=attachment_data.media.image.width,
+                        media_type=media_type,
+                    )
+                )
+
+        if is_bio:
+            response_object.status_type = "bio_status_update"
 
         return FacebookPost(
             post_id=response_object.id,
@@ -177,7 +309,9 @@ class Page:
             status_type=response_object.status_type,
             story=response_object.story,
             created_time=response_object.created_time,
-            page_object=self,
+            attachments=attachments or None,
+            access_token=self.access_token,
+            session=self.session,
         )
 
     @override
