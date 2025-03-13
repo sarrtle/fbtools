@@ -1,9 +1,13 @@
 """All common utility functions for official APIs."""
 
 from datetime import datetime, timedelta, timezone
+from collections.abc import AsyncGenerator
+from aiofiles import open as aopen
 
 
 from fbtools.official.utilities.global_instances import GraphApiVersion
+
+CHUNK_SIZE = 4 * 1024 * 1024
 
 
 def get_expiration_date(expires_in: int) -> str:
@@ -24,3 +28,13 @@ def create_url_format(path: str):
     """Create a url format for the Facebook Graph API."""
     current_version = GraphApiVersion.get_version()
     return f"https://graph.facebook.com/{current_version}/{path}"
+
+
+async def read_file_in_chunks(
+    filepath: str, start_offset: int = 0, chunk_size: int = CHUNK_SIZE
+) -> AsyncGenerator[bytes]:
+    """Async generator that reads a file in chunks starting from given offset."""
+    async with aopen(filepath, "rb") as file:
+        await file.seek(start_offset)
+        while chunk := await file.read(chunk_size):
+            yield chunk

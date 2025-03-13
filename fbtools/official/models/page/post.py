@@ -16,7 +16,7 @@ from fbtools.official.models.extra.attachments import Attachment
 from fbtools.official.models.response.graph import SuccessResponse
 from fbtools.official.utilities.common import create_url_format
 from fbtools.official.utilities.graph_util import (
-    create_page_photo_id,
+    create_photo_id,
 )
 
 
@@ -116,7 +116,7 @@ class FacebookPost:
             attached_media: list[dict[str, str]] = []
 
             for attachment in attachments:
-                photo_id = await create_page_photo_id(
+                photo_id = await create_photo_id(
                     photo_url_or_path=attachment,
                     access_token=self._access_token,
                     session=session,
