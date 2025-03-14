@@ -4,15 +4,13 @@ import asyncio
 from asyncio.tasks import Task
 from mimetypes import guess_type
 from os.path import basename, exists, getsize
-from typing import Callable, Literal, overload, override
+from typing import Callable, Literal, override
 from collections.abc import Coroutine
 from aiofiles import open as aopen
 from httpx import AsyncClient
 
 from fbtools.official.exceptions import PageValidationError
-from fbtools.official.models.extra.attachments import Attachment
 from fbtools.official.models.page.post import FacebookPost
-from fbtools.official.models.response.facebook_post_response import FacebookPostResponse
 from fbtools.official.models.response.graph import (
     VideoStartPhaseResponse,
     VideoUploadStatus,
@@ -227,211 +225,13 @@ class Page:
 
         return file_header
 
-    # ===== Create a Post object =====
-    async def get_post_object(self, post_id: str) -> FacebookPost:
-        """Get post data and return as an object.
-
-        Args:
-            post_id: The id of the post.
-
-        Returns:
-            The FacebookPost object.
-
-        Raises:
-            ValidationError: If something went wrong during validation of api response.
-
-        """
-        url = create_url_format(post_id)
-        fields = [
-            "id",
-            "message",
-            "status_type",
-            "story",
-            "created_time",
-            "target",
-            "attachments.limit(10){media,description,type,title,subattachments,unshimmed_url,target}",
-        ]
-        params = {
-            "access_token": self.access_token,
-            "fields": ",".join(fields),
-        }
-        response = await self.session.get(url, params=params, headers=self._headers)
-
-        response_object = FacebookPostResponse.model_validate(response.json())
-
-        # check if the post is a bio
-        is_bio = False
-
-        # process attachments
-        attachments: list[Attachment] = []
-        if response_object.attachments:
-            attachment_data = response_object.attachments.data[0]
-
-            # for many multiple attachments
-            if attachment_data.subattachments:
-                for subattachments in attachment_data.subattachments.data:
-                    # what I need
-                    # attachment_id
-                    attachment_id = subattachments.target.id
-                    # src
-                    # multiple videos and images has similar
-                    # media properties `subattachment.media.image`
-
-                    # if video
-                    media_type = "video"
-                    if (
-                        subattachments.type == "video"
-                        and subattachments.media.source != None
-                    ):
-                        src = subattachments.media.source
-
-                    # if image
-                    elif subattachments.type == "photo":
-                        media_type = "image"
-                        src = subattachments.media.image.src
-
-                    else:
-                        raise Exception(f"Unknown media type: {subattachments.type}")
-
-                    # thumbnail_src
-                    # since image doesn't have a thumbnail, the src
-                    # is their real image but the video uses this as
-                    # their thumbnail image
-                    thumbnail_src = subattachments.media.image.src
-
-                    # facebook_url
-                    # The URL to facebook post that views the attachment.
-                    facebook_url = subattachments.target.url
-
-                    # description
-                    description = subattachments.description
-
-                    # height
-                    subattachments.media.image.height
-                    # width
-                    subattachments.media.image.width
-
-                    attachments.append(
-                        Attachment(
-                            attachment_id=attachment_id,
-                            src=src,
-                            thumbnail_src=thumbnail_src,
-                            facebook_url=facebook_url,
-                            description=description,
-                            height=subattachments.media.image.height,
-                            width=subattachments.media.image.width,
-                            media_type=media_type,
-                        )
-                    )
-
-            # if bio
-            # bio uses attachments too
-            elif attachment_data.type == "native_templates":
-                is_bio = True
-                # since bio don't have a message, it will use the
-                # attachment description
-                response_object.message = attachment_data.description
-
-            # if single attachment
-            else:
-
-                assert (
-                    attachment_data.media is not None
-                ), "Attachment media is None on single attachment."
-
-                attachment_id = attachment_data.target.id
-
-                # if video
-                media_type = "video"
-                if (
-                    attachment_data.type == "video_inline"
-                    and attachment_data.media.source != None
-                ):
-                    src = attachment_data.media.source
-
-                # if image
-                elif attachment_data.type in ["photo", "album", "profile_media"]:
-                    media_type = "image"
-                    src = attachment_data.media.image.src
-                else:
-                    raise Exception(f"Unknown Attachment type {attachment_data.type}.")
-
-                # if image_profile
-                if attachment_data.type == "profile_media":
-                    media_type = "image_profile"
-                    response_object.status_type = "added_profile_photo"
-
-                # if video reel
-                if "reel" in attachment_data.target.url:
-                    media_type = "video_reel"
-                    response_object.status_type = "added_reel"
-
-                # thumbnail_src
-                # since image doesn't have a thumbnail, the src
-                # is their real image but the video uses this as
-                # their thumbnail image
-                thumbnail_src = attachment_data.media.image.src
-
-                # facebook_url
-                # The URL to facebook post that views the attachment.
-                facebook_url = attachment_data.target.url
-
-                # description
-                description = attachment_data.description
-
-                attachments.append(
-                    Attachment(
-                        attachment_id=attachment_id,
-                        src=src,
-                        thumbnail_src=thumbnail_src,
-                        facebook_url=facebook_url,
-                        description=description,
-                        height=attachment_data.media.image.height,
-                        width=attachment_data.media.image.width,
-                        media_type=media_type,
-                    )
-                )
-
-        if is_bio:
-            response_object.status_type = "bio_status_update"
-
-        return FacebookPost(
-            post_id=response_object.id,
-            message=response_object.message,
-            status_type=response_object.status_type,
-            story=response_object.story,
-            created_time=response_object.created_time,
-            attachments=attachments or None,
-            access_token=self.access_token,
-            session=self.session,
-        )
-
     # ===== Create a post to the feed =====
-    @overload
     async def create_post(
         self,
         message: str,
         images: list[str] | None = None,
         user_id: str | Literal["me"] = "me",
-        create_post_object: bool = True,
-    ) -> FacebookPost: ...
-
-    @overload
-    async def create_post(
-        self,
-        message: str,
-        images: list[str] | None = None,
-        user_id: str | Literal["me"] = "me",
-        create_post_object: bool = False,
-    ) -> bool: ...
-
-    async def create_post(
-        self,
-        message: str,
-        images: list[str] | None = None,
-        user_id: str | Literal["me"] = "me",
-        create_post_object: bool = False,
-    ) -> FacebookPost | bool:
+    ) -> FacebookPost:
         """Create a post.
 
         You can create a text post and an image post.
@@ -446,7 +246,6 @@ class Page:
         Args:
             message: The message written in the post.
             images: If you wish to add images/videos to the post.
-            create_post_object: Whether to return a Post object.
             user_id: The user id or "me". The "me" is used on dev/solo mode.
 
         """
@@ -483,40 +282,17 @@ class Page:
 
         post_id = response_data["id"]
 
-        if create_post_object:
-            return await self.get_post_object(post_id=post_id)
-
-        else:
-            return True
+        return FacebookPost(
+            post_id=post_id, access_token=self.access_token, session=self.session
+        )
 
     # ===== Upload video =====
-    @overload
     async def create_video_post(
         self,
         filepath_or_url: str,
         title: str,
         description: str,
         user_id: str | Literal["me"] = "me",
-        create_post_object: bool = True,
-    ) -> FacebookPost: ...
-
-    @overload
-    async def create_video_post(
-        self,
-        filepath_or_url: str,
-        title: str,
-        description: str,
-        user_id: str | Literal["me"] = "me",
-        create_post_object: bool = False,
-    ) -> bool: ...
-
-    async def create_video_post(
-        self,
-        filepath_or_url: str,
-        title: str,
-        description: str,
-        user_id: str | Literal["me"] = "me",
-        create_post_object: bool = False,
         progress_callback: (
             Callable[
                 [float, float, float, Literal["uploading", "publishing", "finished"]],
@@ -535,7 +311,6 @@ class Page:
             title: The title of the video.
             description: The description of the video.
             user_id: The user id or "me". The "me" is used on dev/solo mode.
-            create_post_object: Whether to return a Post object.
             progress_callback: The callable function for custom progress indicator.
 
         """
@@ -566,40 +341,37 @@ class Page:
             if progress_callback is not None:
                 await progress_callback(100.0, 100.0, 100.0, "finished")
 
-            if create_post_object:
-                url = create_url_format(video_id)
-                params = {"access_token": self.access_token, "fields": "status"}
+            url = create_url_format(video_id)
+            params = {"access_token": self.access_token, "fields": "status"}
 
-                # wait for the video to be published
-                while True:
-                    response = await self.session.get(url=url, params=params)
-                    video_upload_status = VideoUploadStatus.model_validate(
-                        response.json()
-                    )
-
-                    if video_upload_status.status.video_status == "ready":
-                        break
-
-                    if video_upload_status.status.error is not None:
-                        raise Exception(video_upload_status.status.error.message)
-
-                    await asyncio.sleep(1)
-
-                params["fields"] = "post_id"
+            # wait for the video to be published
+            while True:
                 response = await self.session.get(url=url, params=params)
-                response_data = response.json()
+                video_upload_status = VideoUploadStatus.model_validate(response.json())
 
-                if "post_id" not in response_data:
-                    raise Exception(
-                        "Can't find post id after uploading the video. "
-                        + str(response.text)
-                    )
+                if video_upload_status.status.video_status == "ready":
+                    break
 
-                post_id = response_data["post_id"]
+                if video_upload_status.status.error is not None:
+                    raise Exception(video_upload_status.status.error.message)
 
-                return await self.get_post_object(post_id=post_id)
+                await asyncio.sleep(1)
 
-            return True
+            params["fields"] = "post_id"
+            response = await self.session.get(url=url, params=params)
+            response_data = response.json()
+
+            if "post_id" not in response_data:
+                raise Exception(
+                    "Can't find post id after uploading the video. "
+                    + str(response.text)
+                )
+
+            post_id = response_data["post_id"]
+
+            return FacebookPost(
+                post_id=post_id, access_token=self.access_token, session=self.session
+            )
 
         # for local video
         else:
@@ -710,43 +482,42 @@ class Page:
             print()  # will move the cursor to the next line
 
             # get post id
-            if create_post_object:
-                url = create_url_format(vsp.video_id)
-                params = {"access_token": self.access_token, "fields": "status"}
+            url = create_url_format(vsp.video_id)
+            params = {"access_token": self.access_token, "fields": "status"}
 
-                # wait for the video to be published
-                while True:
-                    response = await self.session.get(url=url, params=params)
-                    video_upload_status = VideoUploadStatus.model_validate(
-                        response.json()
-                    )
-
-                    if video_upload_status.status.video_status == "ready":
-                        break
-
-                    if video_upload_status.status.error is not None:
-                        raise Exception(
-                            "Failed to upload video. "
-                            + video_upload_status.status.error.message
-                        )
-
-                    await asyncio.sleep(1)
-
-                params["fields"] = "post_id"
+            # wait for the video to be published
+            while True:
                 response = await self.session.get(url=url, params=params)
-                response_data = response.json()
+                video_upload_status = VideoUploadStatus.model_validate(response.json())
 
-                if "post_id" not in response_data:
+                if video_upload_status.status.video_status == "ready":
+                    break
+
+                if video_upload_status.status.error is not None:
                     raise Exception(
-                        "Can't find post id after uploading the video. "
-                        + str(response.text)
+                        "Failed to upload video. "
+                        + video_upload_status.status.error.message
                     )
 
-                post_id = f"{self.page_id}_{response_data['post_id']}"
+                await asyncio.sleep(1)
 
-                return await self.get_post_object(post_id=post_id)
+            params["fields"] = "post_id"
+            response = await self.session.get(url=url, params=params)
+            response_data = response.json()
 
-        return True
+            if "post_id" not in response_data:
+                raise Exception(
+                    "Can't find post id after uploading the video. "
+                    + str(response.text)
+                )
+
+            post_id = f"{self.page_id}_{response_data['post_id']}"
+
+            return FacebookPost(
+                post_id=post_id,
+                access_token=self.access_token,
+                session=self.session,
+            )
 
     @override
     def __repr__(self):
