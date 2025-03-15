@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncGenerator
 from aiofiles import open as aopen
 
+from httpx import HTTPStatusError, Response
 
 from fbtools.official.utilities.global_instances import GraphApiVersion
 
@@ -38,3 +39,25 @@ async def read_file_in_chunks(
         await file.seek(start_offset)
         while chunk := await file.read(chunk_size):
             yield chunk
+
+
+def raise_for_status(response: Response):
+    """Raise exceptions for httpx response.
+
+    Args:
+        response: The httpx response.
+
+    Raises:
+        HttpStatusError: If http status code is not 200.
+
+    Returns:
+        The json data.
+
+    """
+    # raise common exception status
+    if response.status_code != 200:
+        raise HTTPStatusError(
+            message=f"{response.status_code} {response.text}",
+            request=response.request,
+            response=response,
+        )

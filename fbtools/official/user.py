@@ -3,12 +3,8 @@
 from typing import Literal
 from httpx import AsyncClient
 
-from fbtools.official.exceptions import (
-    GenerateUserAccessTokenError,
-    LoginError,
-    UserValidationError,
-)
 from fbtools.official.models.validation.page_response import PageResponse
+from fbtools.official.utilities.common import raise_for_status
 from fbtools.official.utilities.fbauthflow import FacebookAuthFlow
 
 from fbtools.official.page import Page
@@ -51,7 +47,7 @@ class User:
             skip_validation: Skip validation of the access token.
 
         Raises:
-            LoginError: If something went wrong during login.
+            HTTPStatusError: If something went wrong during login.
 
         """
         # need validation of the token before use
@@ -60,9 +56,7 @@ class User:
             # another method.
             params = {"access_token": user_access_token, "fields": "short_name"}
             response = await self.session.get(self.user_id, params=params)
-
-            if response.status_code != 200:
-                raise LoginError(error_type=UserValidationError(response.text))
+            raise_for_status(response)
 
         self.access_token = user_access_token
 
@@ -81,14 +75,12 @@ class User:
 
         Raises:
             LoginError: If can't generate user access token.
+            RuntimeError: Failed to retrieve access token.
 
         """
         auth = FacebookAuthFlow(client_id=client_id, client_secret=client_secret)
 
-        try:
-            token = auth.get_token()
-        except RuntimeError as e:
-            raise LoginError(error_type=GenerateUserAccessTokenError(str(e)))
+        token = auth.get_token()
 
         self.access_token = token
         print("Generated access token:", self.access_token)

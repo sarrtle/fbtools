@@ -9,7 +9,6 @@ from collections.abc import Coroutine
 from aiofiles import open as aopen
 from httpx import AsyncClient
 
-from fbtools.official.exceptions import PageValidationError
 from fbtools.official.models.page.post import FacebookPost
 from fbtools.official.models.response.graph import (
     VideoStartPhaseResponse,
@@ -18,7 +17,7 @@ from fbtools.official.models.response.graph import (
 from fbtools.official.models.validation.page_response import PageDataItem
 
 
-from fbtools.official.utilities.common import create_url_format
+from fbtools.official.utilities.common import create_url_format, raise_for_status
 from fbtools.official.utilities.graph_util import create_photo_id
 
 
@@ -105,9 +104,7 @@ class Page:
             "fields": "global_brand_page_name",
         }
         response = await self.session.get("me", params=params)
-
-        if response.status_code != 200:
-            raise PageValidationError(response.text)
+        raise_for_status(response)
 
     def save_page_access_token(
         self, page_access_token: str, filepath: str = "page_token.txt"
@@ -300,7 +297,7 @@ class Page:
             ]
             | None
         ) = None,
-    ) -> FacebookPost | bool:
+    ) -> FacebookPost:
         """Create a video post.
 
         You can't upload multiple videos at once, you can't

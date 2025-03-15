@@ -198,6 +198,9 @@ class FacebookAuthFlow:
         Returns:
             The access token.
 
+        Raises:
+            RuntimeError: If the access token is not retrieved.
+
         """
         # Start server in background thread
         server_thread = threading.Thread(target=self._run_server, daemon=True)
