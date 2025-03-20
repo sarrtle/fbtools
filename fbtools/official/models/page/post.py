@@ -12,10 +12,12 @@ from typing import Literal
 from httpx import AsyncClient
 
 
-from fbtools.official.models.extra.attachments import Attachment
+from fbtools.official.models.extra.facebook_post_attachment import (
+    FacebookPostAttachment,
+)
 from fbtools.official.models.response.facebook_post_response import FacebookPostResponse
 from fbtools.official.models.response.graph import SuccessResponse
-from fbtools.official.utilities.common import create_url_format
+from fbtools.official.utilities.common import create_url_format, raise_for_status
 from fbtools.official.utilities.graph_util import (
     create_photo_id,
 )
@@ -61,7 +63,7 @@ class FacebookPost:
             | None
         ) = None
         self._story: str | None = None
-        self._attachments: list[Attachment] | None = None
+        self._attachments: list[FacebookPostAttachment] | None = None
         self._created_time: datetime = datetime.now(
             tz=timezone.utc
         )  # this is fine, will initialize them later
@@ -79,7 +81,7 @@ class FacebookPost:
     # ===== UPDATING POST =====
     async def update_post(
         self,
-        message: str,
+        message: str | None = None,
         attachments: list[str] | None = None,
     ) -> bool:
         """Update the post.
@@ -89,14 +91,21 @@ class FacebookPost:
             attachments: If you wish to add images/videos to the post.
             get_post_object: If you want to get the post object.
 
-        Raise:
+        Raises:
             ValidationError: If something went wrong during validation of api response.
+            ValueError: If you did not provide either message or attachments.
 
         """
+        if message is None and attachments is None:
+            raise ValueError("You must provide either 'message' or 'attachments'.")
+
         url = create_url_format(self.post_id)
-        data = {"message": message}
+        data: dict[str, str | list[dict[str, str]]] = {}
         params = {"access_token": self._access_token}
         session = self._session
+
+        if message:
+            data["message"] = message
 
         if attachments:
             attached_media: list[dict[str, str]] = []
@@ -109,18 +118,34 @@ class FacebookPost:
                 )
                 attached_media.append({"media_fbid": photo_id})
 
+            data["attached_media"] = attached_media
+
         response = await session.post(
             url=url, json=data, params=params, headers=self._headers
         )
+        raise_for_status(response)
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
 
         # return boolean
         return response_data.success
 
     # ===== DELETING POST =====
-    async def delete_post(self) -> "FacebookPost":
-        """Delete the post."""
-        raise NotImplementedError
+    async def delete_post(self) -> bool:
+        """Delete the post.
+
+        Raises:
+            HttpStatusError: If something went wrong during request.
+            ValidationError: If something went wrong during validation of api response.
+
+        """
+        url = create_url_format(self.post_id)
+        params = {"access_token": self._access_token}
+        response = await self._session.delete(
+            url=url, params=params, headers=self._headers
+        )
+        raise_for_status(response)
+        response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
+        return response_data.success
 
     # ===== GETTING COMMENTS =====
     async def get_comments(self) -> "FacebookPost":
@@ -149,13 +174,14 @@ class FacebookPost:
         response = await self._session.get(
             url=url, params=params, headers=self._headers
         )
+        raise_for_status(response)
         response_object = FacebookPostResponse.model_validate(response.json())
 
         # check if the post is a bio
         is_bio = False
 
         # process attachments
-        attachments: list[Attachment] = []
+        attachments: list[FacebookPostAttachment] = []
         if response_object.attachments:
             attachment_data = response_object.attachments.data[0]
 
@@ -204,7 +230,7 @@ class FacebookPost:
                     subattachments.media.image.width
 
                     attachments.append(
-                        Attachment(
+                        FacebookPostAttachment(
                             attachment_id=attachment_id,
                             src=src,
                             thumbnail_src=thumbnail_src,
@@ -272,7 +298,7 @@ class FacebookPost:
                 description = attachment_data.description
 
                 attachments.append(
-                    Attachment(
+                    FacebookPostAttachment(
                         attachment_id=attachment_id,
                         src=src,
                         thumbnail_src=thumbnail_src,
@@ -348,7 +374,7 @@ class FacebookPost:
         return self._story
 
     @property
-    def attachments(self) -> list[Attachment] | None:
+    def attachments(self) -> list[FacebookPostAttachment] | None:
         """The attachments of the post."""
         self._check_initialized()
         return self._attachments
