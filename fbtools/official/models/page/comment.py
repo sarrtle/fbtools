@@ -6,9 +6,11 @@ handle a comment.
 Add comment, edit comment and delete comment.
 """
 
+import asyncio
 from datetime import datetime
 from typing import Literal, override
 from os.path import exists
+import warnings
 from httpx import AsyncClient
 
 from fbtools.official.models.extra.facebook_comment_models import (
@@ -16,10 +18,11 @@ from fbtools.official.models.extra.facebook_comment_models import (
     FacebookCommentAttachment,
 )
 from fbtools.official.models.response.facebook_comment_response import (
+    CommentAttachment,
     CommentData,
     FacebookCommentResponse,
 )
-from fbtools.official.models.response.graph import SuccessResponse
+from fbtools.official.models.response.graph import ObjectIdResponse, SuccessResponse
 from fbtools.official.utilities.common import create_url_format, raise_for_status
 from fbtools.official.utilities.graph_util import create_photo_id
 
@@ -39,24 +42,32 @@ class FacebookComment:
 
     Notes:
         If there is a comment reply in this comment object, they
-        will be limited upto 10 comment reply only. Otherwise, to
+        will be limited upto 25 comment reply only. Otherwise, to
         get all of the comment reply, you need to use the `get_reply_comments`
         method.
 
     """
 
-    def __init__(self, comment_id: str, access_token: str, session: AsyncClient):
+    def __init__(
+        self,
+        comment_id: str,
+        access_token: str,
+        session: AsyncClient,
+        parent_comment: "FacebookComment | None" = None,
+    ):
         """Initialize FacebookComment.
 
         Args:
             comment_id: the `id` of the comment.
             access_token: The access token of the page
             session: The httpx async session
+            parent_comment: The parent comment
 
         """
         self._comment_id: str = comment_id
         self._access_token: str = access_token
         self._session: AsyncClient = session
+        self._parent_comment: FacebookComment | None = parent_comment
 
         # initialize attributes that is not their data
         self._message: str | None = None
@@ -91,10 +102,11 @@ class FacebookComment:
         Raises:
             ValidationError: If something went wrong during validation of api response.
             ValueError: If you did not provide either message or attachment.
+            RuntimeError: Something doesn't work with the code.
 
         """
         url = create_url_format(self.comment_id)
-        data: dict[str, str | list[dict[str, str]]] = {}
+        data: dict[str, str] = {}
         params = {"access_token": self._access_token}
         session = self._session
 
@@ -121,6 +133,32 @@ class FacebookComment:
         raise_for_status(response)
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
 
+        # update message to the comment object
+        self._message = message
+
+        # update attachment to the comment object
+        if attachment != None:
+            # re-requesting to the api to get only the attachment data
+            # this method is only what is available in order to get the attachment
+            # data from the comment object. I tried the `me/photos` endpoint but
+            # it is not enough, what if for the video attachment? video endpoints
+            # are complicated and for the gif that uses animated_image_share, will
+            # be almost impossible to get the attachment id from those endpoints.
+            url = create_url_format(self.comment_id)
+            params = {"access_token": self._access_token, "fields": "attachment"}
+            response = await self._session.get(
+                url=url, params=params, headers=self._headers
+            )
+            raise_for_status(response=response)
+
+            if "attachment" not in response.json():
+                raise RuntimeError("No attachment data from the comment object.")
+
+            response_object = CommentAttachment.model_validate(
+                response.json()["attachment"]  # finger cross we get this attachment
+            )
+            self._attachment = self._parse_attachment(response_object)
+
         return response_data.success
 
     async def delete_comment(self) -> bool:
@@ -140,10 +178,86 @@ class FacebookComment:
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
         return response_data.success
 
+    async def add_reply_comment(
+        self, message: str | None = None, attachment: str | None = None
+    ) -> "FacebookComment":
+        """Add a reply to the comment.
+
+        The return object is a Comment object. You need to run
+        `initialize_properties` method in order to access some data
+        your need.
+
+        Args:
+            message: The new message written in the comment.
+            attachment: If you wish to add images/videos to the comment.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+            ValueError: If you did not provide either message or attachment.
+
+        Returns:
+            a FacebookComment object.
+
+        """
+        url = create_url_format(f"{self.comment_id}/comments")
+        data: dict[str, str | None] = {}
+        params = {"access_token": self._access_token}
+        session = self._session
+
+        if message != None:
+            data["message"] = message
+
+        if attachment:
+            if attachment.startswith("https://"):
+                data["attachment_url"] = attachment
+            elif exists(attachment):
+                photo_id = await create_photo_id(
+                    photo_url_or_path=attachment,
+                    access_token=self._access_token,
+                    session=session,
+                )
+                data["attachment_id"] = photo_id
+            else:
+                raise ValueError(
+                    "Can't validate your attachment. Please ensure you provided a valid url or file path."
+                )
+        response = await session.post(
+            url=url, params=params, headers=self._headers, json=data
+        )
+        raise_for_status(response)
+
+        response_object: ObjectIdResponse = ObjectIdResponse.model_validate(
+            response.json()
+        )
+
+        comment_object = FacebookComment(
+            comment_id=response_object.id,
+            access_token=self._access_token,
+            session=self._session,
+        )
+
+        # initialize properties
+        # get the next cursor if available
+        self._current_reply_after_cursor, _ = await asyncio.gather(
+            self._get_next_cursor(),
+            comment_object.initialize_properties(),
+        )
+
+        # update reply count and reply objects
+        self._available_reply_count += 1
+        self._replies.append(comment_object)
+
+        return comment_object
+
     async def get_reply_comments(
         self, limit: int | None = None
     ) -> list["FacebookComment"]:
         """Get the reply comments of the comment.
+
+        Tips:
+            you can use `limit` parameter up to 100 to get all the
+            comments in one scope, then another 100 later if there are more
+            reply comments available.
 
         Args:
             limit: The maximum number of reply comments to return.
@@ -191,6 +305,7 @@ class FacebookComment:
                     comment_id=reply_comment.id,
                     access_token=self._access_token,
                     session=self._session,
+                    parent_comment=self,
                 )
                 reply_comment_object.put_initialized_properties(
                     response_object=reply_comment
@@ -221,8 +336,32 @@ class FacebookComment:
         # other uses
         return reply_comments[:limit] if limit else reply_comments
 
+    async def refresh(self) -> None:
+        """Refresh the comment object.
+
+        Warning:
+            Doing this will reset the comment object. Its reply
+            objects will also be reset until to its maximum limited number.
+            You need to run `get_reply_comments` again to get the all or some
+            of the reply comments left.
+
+        """
+        # reset reply properties
+        self._initilized = False
+        self._replies = []
+        self._available_reply_count = 0
+        self._current_reply_after_cursor = None
+
+        await self.initialize_properties()
+
     async def initialize_properties(self) -> None:
         """Fetch comment data from the Graph API and initialize properties."""
+        if self._initilized:
+            warnings.warn(
+                f"Comment object: {self._comment_id} was already initialized. This method will have no effect"
+            )
+            return
+
         url = create_url_format(self.comment_id)
         params = self._create_params()
         response = await self._session.get(
@@ -256,6 +395,7 @@ class FacebookComment:
         "_message",
         "_access_token",
         "_session",
+        "_parent_comment",
         "_reaction_count",
         "_is_page_reacted",
         "_page_reaction",
@@ -294,6 +434,11 @@ class FacebookComment:
     def comment_id(self) -> str:
         """The `id` of the comment."""
         return self._comment_id
+
+    @property
+    def parent_comment(self) -> "FacebookComment | None":
+        """The parent comment of the comment."""
+        return self._parent_comment
 
     @property
     def message(self) -> str | None:
@@ -352,7 +497,13 @@ class FacebookComment:
 
     @property
     def are_replies_available(self) -> bool:
-        """Whether the replies of the comment are available."""
+        """Whether the comment's replies can be retrieved using `get_reply_comments`.
+
+        Notes:
+            This is not for knowing if the comment has replies. Check if the `replies`
+            property is not empty.
+
+        """
         self._is_initialized()
         return self._are_replies_available
 
@@ -421,6 +572,41 @@ class FacebookComment:
         if not self._initilized:
             raise Exception("Comment object is not initialized.")
 
+    def _parse_attachment(
+        self, attachment_object: CommentAttachment
+    ) -> FacebookCommentAttachment:
+        attachment_id = attachment_object.target.id
+
+        match attachment_object.type:
+            case "photo":
+                media_type = "image"
+            case "video_inline":
+                media_type = "video"
+            case "animated_image_share":
+                media_type = "gif"
+
+        if attachment_object.media.source != None:
+            src = attachment_object.media.source
+        else:
+            src = attachment_object.media.image.src
+
+        thumbnail_src = attachment_object.media.image.src
+
+        facebook_url = attachment_object.target.url
+
+        height = attachment_object.media.image.height
+        width = attachment_object.media.image.width
+
+        return FacebookCommentAttachment(
+            attachment_id=attachment_id,
+            src=src,
+            thumbnail_src=thumbnail_src,
+            facebook_url=facebook_url,
+            height=height,
+            width=width,
+            media_type=media_type,
+        )
+
     def _parse_response_object(self, response_object: FacebookCommentResponse):
         """Parse the response object and initialize the comment object."""
         # comment message
@@ -440,37 +626,7 @@ class FacebookComment:
 
         # attachments
         if response_object.attachment != None:
-            attachment_id = response_object.attachment.target.id
-
-            match response_object.attachment.type:
-                case "photo":
-                    media_type = "image"
-                case "video_inline":
-                    media_type = "video"
-                case "animated_image_share":
-                    media_type = "gif"
-
-            if response_object.attachment.media.source != None:
-                src = response_object.attachment.media.source
-            else:
-                src = response_object.attachment.media.image.src
-
-            thumbnail_src = response_object.attachment.media.image.src
-
-            facebook_url = response_object.attachment.target.url
-
-            height = response_object.attachment.media.image.height
-            width = response_object.attachment.media.image.width
-
-            self._attachment = FacebookCommentAttachment(
-                attachment_id=attachment_id,
-                src=src,
-                thumbnail_src=thumbnail_src,
-                facebook_url=facebook_url,
-                height=height,
-                width=width,
-                media_type=media_type,
-            )
+            self._attachment = self._parse_attachment(response_object.attachment)
 
         # like count
         self._reaction_count = response_object.reactions.summary.total_count
@@ -485,6 +641,7 @@ class FacebookComment:
                     comment_id=self.comment_id,
                     access_token=self._access_token,
                     session=self._session,
+                    parent_comment=self,
                 )
                 reply_comment_object.put_initialized_properties(response_object=comment)
 
@@ -505,3 +662,22 @@ class FacebookComment:
 
         # set as initialized
         self._initilized = True
+
+    async def _get_next_cursor(self) -> str | None:
+        """Get the next cursor of the comment.
+
+        Will return `None` if there are no `next`
+        object instead of getting only the `after`
+        object.
+        """
+        url = create_url_format(f"{self.comment_id}/comments")
+        params = self._create_params()
+        params["summary"] = "true"
+        response = await self._session.get(url, params=params)
+
+        response_object = CommentData.model_validate(response.json())
+
+        if response_object.paging and response_object.paging.next:
+            return response_object.paging.cursors.after
+
+        return None

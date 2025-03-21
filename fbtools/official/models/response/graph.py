@@ -13,6 +13,13 @@ class SuccessResponse(BaseModel):
 
 
 # ==============================================================================
+class ObjectIdResponse(BaseModel):
+    """Object id response from Facebook Graph API."""
+
+    id: str
+
+
+# ==============================================================================
 class VideoStartPhaseResponse(BaseModel):
     """Response from starting a video upload session."""
 
