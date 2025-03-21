@@ -1,9 +1,9 @@
-"""Attachment object."""
+"""Facebook post attachment object."""
 
-from typing import Literal
+from typing import Literal, override
 
 
-class Attachment:
+class FacebookPostAttachment:
     """Attachment object."""
 
     def __init__(
@@ -39,4 +39,19 @@ class Attachment:
         self.width: int = width
         self.media_type: Literal["image", "video", "image_profile", "video_reel"] = (
             media_type
+        )
+
+    @override
+    def __repr__(self) -> str:
+        return (
+            f"FacebookPostAttachment("
+            f"attachment_id={self.attachment_id}, "
+            f"src={self.src}, "
+            f"thumbnail_src={self.thumbnail_src}, "
+            f"facebook_url={self.facebook_url}, "
+            f"description={self.description}, "
+            f"height={self.height}, "
+            f"width={self.width}, "
+            f"media_type={self.media_type}"
+            f")"
         )

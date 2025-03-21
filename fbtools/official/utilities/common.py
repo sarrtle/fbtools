@@ -50,9 +50,6 @@ def raise_for_status(response: Response):
     Raises:
         HttpStatusError: If http status code is not 200.
 
-    Returns:
-        The json data.
-
     """
     # raise common exception status
     if response.status_code != 200:
