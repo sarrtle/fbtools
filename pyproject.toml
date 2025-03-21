@@ -5,6 +5,8 @@ description = "A tool for facebook automation for both official and unofficial."
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "aiofiles>=24.1.0",
+    "cachetools>=5.5.2",
     "fastapi>=0.115.8",
     "httpx>=0.28.1",
     "uvicorn>=0.34.0",
