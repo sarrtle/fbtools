@@ -58,3 +58,46 @@ def raise_for_status(response: Response):
             request=response.request,
             response=response,
         )
+
+
+def create_comment_fields() -> str:
+    """Create the commenet parameters for the Graph API request."""
+    comment_fields = [
+        "attachment",
+        "created_time",
+        "from",
+        "id",
+        "like_count",
+        "message",
+        "parent",
+        "user_likes",
+        "reactions.summary(true)",
+        "permalink_url",
+        "object",
+        "comments.summary(true)",
+        "likes",
+    ]
+
+    reaction_fields = [
+        "id",
+        "name",
+        "type",
+        "username",
+        "profile_type",
+        "pic_large",
+        "pic_small",
+        "link",
+        "can_post",
+    ]
+
+    # add reaction fields on the comment
+    comment_fields[
+        comment_fields.index("reactions.summary(true)")
+    ] += "{%s}" % ",".join(reaction_fields)
+
+    # add comment fields on the comment
+    comment_fields[comment_fields.index("comments.summary(true)")] += "{%s}" % ",".join(
+        comment_fields
+    )
+
+    return ",".join(comment_fields)

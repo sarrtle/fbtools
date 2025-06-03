@@ -1,8 +1,66 @@
 """Response objects for Facebook Graph API."""
 
 from datetime import datetime
+import json
 from typing import Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, model_validator
+
+from fbtools.official.models.response.facebook_comment_response import CommentData
+
+
+class BatchResponseBase(BaseModel):
+    """Base object for batch response that requires validation."""
+
+    @model_validator(mode="before")
+    def _parse_body_to_dict(cls, values: dict[str, dict[str, str] | str | object]):
+        raw_body = values.get("body")
+
+        if raw_body is None:
+            raise ValidationError("body was not found in batch response.")
+
+        parsed: dict[str, str]
+
+        if isinstance(raw_body, str):
+            try:
+                parsed = json.loads(raw_body)
+            except json.JSONDecodeError as exc:
+                raise ValidationError from exc
+        elif isinstance(raw_body, dict):
+            parsed = raw_body
+        else:
+            raise ValidationError("body was not a string or a dict in batch response.")
+
+        values["body"] = parsed
+        return values
+
+
+class BatchResponseForPost(BatchResponseBase):
+    """Batch post response from Facebook Graph API."""
+
+    code: int
+    body: "FacebookPostResponse"
+
+
+class BatchResponseForCommentCount(BatchResponseBase):
+    """Batch comment count response from Facebook Graph API."""
+
+    code: int
+    body: "AllCommentCount"
+
+
+class AllCommentCount(BaseModel):
+    """Counting all comments using stream."""
+
+    data: list[str] = []
+    summary: "SumamryForCount"
+
+
+class SumamryForCount(BaseModel):
+    """Summary for comment count."""
+
+    order: Literal["chronological"]
+    total_count: int
+    can_comment: bool
 
 
 class FacebookPostResponse(BaseModel):
@@ -30,6 +88,9 @@ class FacebookPostResponse(BaseModel):
     story: str | None = None
     created_time: datetime
     attachments: "FacebookPostAttachment | None" = None
+    comments: "CommentData | None" = None
+    reactions: "Reaction | None" = None
+    shares: "ShareData | None" = None
 
 
 class FacebookPostAttachment(BaseModel):
@@ -102,6 +163,64 @@ class MediaProperties(BaseModel):
     height: int
     src: str
     width: int
+
+
+class Reaction(BaseModel):
+    """Reaction field."""
+
+    data: list["ReactionData"]
+    paging: "PagingData | None" = None
+    summary: "SummaryData"
+
+
+# TODO: This is seem redundant, put them on common field
+#       models
+class PagingData(BaseModel):
+    """Paging data."""
+
+    cursors: "CursorData"
+    next: str | None = None
+
+
+class CursorData(BaseModel):
+    """Cursor data."""
+
+    before: str
+    after: str
+
+
+class SummaryData(BaseModel):
+    """Summary data."""
+
+    total_count: int
+    viewer_reaction: (
+        Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"] | None
+    ) = None
+
+    @model_validator(mode="before")
+    def _validate_page_reaction(cls, values: dict[str, str | None]):
+        if "viewer_reaction" not in values:
+            raise ValidationError(
+                "`viewer_reaction` was not found in reaction summary."
+            )
+
+        if values["viewer_reaction"] == "NONE":
+            values["viewer_reaction"] = None
+        return values
+
+
+class ReactionData(BaseModel):
+    """Reaction data."""
+
+    id: str
+    name: str
+    type: Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"]
+
+
+class ShareData(BaseModel):
+    """Share data."""
+
+    count: int
 
 
 FacebookPostResponse.model_rebuild()

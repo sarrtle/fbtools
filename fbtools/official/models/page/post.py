@@ -7,20 +7,34 @@ Add post, edit post and delete post.
 """
 
 from datetime import datetime, timezone
-from typing import Literal
+from typing import Literal, cast, override
+import json
 
 from httpx import AsyncClient
+from pydantic import TypeAdapter
 
-
+import fbtools.official.models.page.comment as fb_comment
 from fbtools.official.models.extra.facebook_post_attachment import (
     FacebookPostAttachment,
 )
-from fbtools.official.models.response.facebook_post_response import FacebookPostResponse
+from fbtools.official.models.response.facebook_post_response import (
+    AllCommentCount,
+    BatchResponseForCommentCount,
+    BatchResponseForPost,
+    FacebookPostResponse,
+)
 from fbtools.official.models.response.graph import SuccessResponse
-from fbtools.official.utilities.common import create_url_format, raise_for_status
+from fbtools.official.utilities.common import (
+    create_comment_fields,
+    create_url_format,
+    raise_for_status,
+)
 from fbtools.official.utilities.graph_util import (
     create_photo_id,
 )
+
+# Types for initializing object
+BATCH_RESPONSE = TypeAdapter(list[BatchResponseForPost | BatchResponseForCommentCount])
 
 
 class FacebookPost:
@@ -47,6 +61,7 @@ class FacebookPost:
             post_id: The `id` of the post.
             access_token: The access token of the page.
             session: The httpx async session.
+            get_comments: If you want to get the comments of the post.
 
         """
         self._post_id: str = post_id
@@ -63,10 +78,21 @@ class FacebookPost:
             | None
         ) = None
         self._story: str | None = None
-        self._attachments: list[FacebookPostAttachment] | None = None
+        self._attachments: list[FacebookPostAttachment] = []
         self._created_time: datetime = datetime.now(
             tz=timezone.utc
         )  # this is fine, will initialize them later
+        self._reaction_count: int = 0
+        self._page_reaction: (
+            Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"] | None
+        ) = None
+        self._comments: list[fb_comment.FacebookComment] = []
+        self._can_comment: bool = False
+        self._are_comments_available: bool = False
+        self._available_comments_count: int = 0
+        self._comments_count: int = 0
+        self._shares_count: int = 0
+
         self._access_token: str = access_token
         self._session: AsyncClient = session
 
@@ -76,15 +102,15 @@ class FacebookPost:
         # important attributes
         self._initialized: bool = False
 
-    # =============== USEFUL METHODS ===============
-
-    # ===== UPDATING POST =====
-    async def update_post(
+    # ===============================================
+    #               USEFUL METHODS
+    # ===============================================
+    async def edit_post(
         self,
         message: str | None = None,
         attachments: list[str] | None = None,
     ) -> bool:
-        """Update the post.
+        """Edit the post.
 
         Args:
             message: The new message written in the post.
@@ -104,7 +130,7 @@ class FacebookPost:
         params = {"access_token": self._access_token}
         session = self._session
 
-        if message:
+        if message != None:
             data["message"] = message
 
         if attachments:
@@ -129,7 +155,6 @@ class FacebookPost:
         # return boolean
         return response_data.success
 
-    # ===== DELETING POST =====
     async def delete_post(self) -> bool:
         """Delete the post.
 
@@ -147,19 +172,37 @@ class FacebookPost:
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
         return response_data.success
 
-    # ===== GETTING COMMENTS =====
     async def get_comments(self) -> "FacebookPost":
-        """Get the comments of the post."""
+        """Get the comments of the post.
+
+        Will append the comments to the comments attribute.
+        """
         raise NotImplementedError
 
-    # ===== GETTING LIKES =====
     async def get_likes(self) -> "FacebookPost":
         """Get the likes of the post."""
         raise NotImplementedError
 
-    # ===== Initialize Properties =====
-    async def initialize_properties(self) -> None:
-        """Fetch post data from the Graph API and initialize its properties."""
+    async def refresh(self) -> None:
+        """Refresh the post object.
+
+        Warning:
+            Doing this will reset the post object.
+
+        """
+        await self.initialize_properties()
+
+    async def initialize_properties(self, get_comments: bool = False) -> None:
+        """Fetch post data from the Graph API and initialize its properties.
+
+        The `get_comments` is separated because you might not want to get comments if
+        you just want to use the post object for something else. This will save you
+        bytes from your apps.
+
+        Args:
+            get_comments: If you want to get the comments of the post.
+
+        """
         url = create_url_format(self.post_id)
         fields = [
             "id",
@@ -169,21 +212,74 @@ class FacebookPost:
             "created_time",
             "target",
             "attachments.limit(10){media,description,type,title,subattachments,unshimmed_url,target}",
+            "reactions.summary(true)",
+            "shares",
         ]
-        params = {"access_token": self._access_token, "fields": ",".join(fields)}
-        response = await self._session.get(
+
+        # additional params for comments
+        if get_comments:
+            fields.append("comments.summary(true){%s}" % create_comment_fields())
+
+        # create fields
+        request_field = ", ".join(fields)
+
+        # batch request data
+        batch_request_data = json.dumps(
+            [
+                {
+                    "method": "GET",
+                    "relative_url": "%s?fields=%s" % (self.post_id, request_field),
+                },
+                {
+                    "method": "GET",
+                    "relative_url": "%s/comments?summary=true&filter=stream&limit=0"
+                    % self.post_id,
+                },
+            ]
+        )
+        params = {
+            "access_token": self._access_token,
+            "batch": batch_request_data,
+            "include_headers": "false",
+        }
+        response = await self._session.post(
             url=url, params=params, headers=self._headers
         )
+
         raise_for_status(response)
-        response_object = FacebookPostResponse.model_validate(response.json())
+
+        facebook_post: FacebookPostResponse | None = None
+        facebook_comment_all_count: AllCommentCount | None = None
+
+        raw_data = cast(list[dict[str, object]], response.json())
+        response_object = BATCH_RESPONSE.validate_python(raw_data)
+
+        # put the data to their respective variables
+        for rd in response_object:
+            # check response status
+            if rd.code != 200:
+                raise Exception(rd.body)
+
+            if isinstance(rd, BatchResponseForPost):
+                facebook_post = rd.body
+            else:
+                facebook_comment_all_count = rd.body
+
+        # all these exceptions will be one exception object for
+        # initialization error with these kind of messages
+        if facebook_post == None:
+            raise Exception("Post response was not found")
+
+        if facebook_comment_all_count == None:
+            raise Exception("Comment count count was not found")
 
         # check if the post is a bio
         is_bio = False
 
         # process attachments
         attachments: list[FacebookPostAttachment] = []
-        if response_object.attachments:
-            attachment_data = response_object.attachments.data[0]
+        if facebook_post.attachments:
+            attachment_data = facebook_post.attachments.data[0]
 
             # for many multiple attachments
             if attachment_data.subattachments:
@@ -248,7 +344,7 @@ class FacebookPost:
                 is_bio = True
                 # since bio don't have a message, it will use the
                 # attachment description
-                response_object.message = attachment_data.description
+                facebook_post.message = attachment_data.description
 
             # if single attachment
             else:
@@ -277,12 +373,12 @@ class FacebookPost:
                 # if image_profile
                 if attachment_data.type == "profile_media":
                     media_type = "image_profile"
-                    response_object.status_type = "added_profile_photo"
+                    facebook_post.status_type = "added_profile_photo"
 
                 # if video reel
                 if "reel" in attachment_data.target.url:
                     media_type = "video_reel"
-                    response_object.status_type = "added_reel"
+                    facebook_post.status_type = "added_reel"
 
                 # thumbnail_src
                 # since image doesn't have a thumbnail, the src
@@ -311,17 +407,53 @@ class FacebookPost:
                 )
 
         if is_bio:
-            response_object.status_type = "bio_status_update"
+            facebook_post.status_type = "bio_status_update"
+
+        # process comments
+        if facebook_post.comments:
+            for comment in facebook_post.comments.data:
+                comment_object = fb_comment.FacebookComment(
+                    comment_id=comment.id,
+                    access_token=self._access_token,
+                    session=self._session,
+                    parent_comment=None,
+                    parent_post=self,
+                )
+                comment_object.put_initialized_properties(comment)
+
+                # print(len(cdt))
+
+                self._comments.append(comment_object)
+
+        # comment count
+        self._comments_count = facebook_comment_all_count.summary.total_count
+
+        # reaction count
+        if facebook_post.reactions:
+            self._reaction_count = facebook_post.reactions.summary.total_count
+
+        # page reaction
+        if facebook_post.reactions:
+            self._page_reaction = facebook_post.reactions.summary.viewer_reaction
+
+        # share count
+        if facebook_post.shares:
+            self._shares_count = facebook_post.shares.count
+
+        # indicator
+        self._can_comment = facebook_comment_all_count.summary.can_comment
 
         # add them to their attributes
-        self._message = response_object.message
-        self._status_type = response_object.status_type
-        self._story = response_object.story
-        self._created_time = response_object.created_time
-        self._attachments = attachments or None
+        self._message = facebook_post.message
+        self._status_type = facebook_post.status_type
+        self._story = facebook_post.story
+        self._created_time = facebook_post.created_time
+        self._attachments = attachments
         self._initialized = True
 
-    # =============== OBJECT CONTROL ===============
+    # ===============================================
+    #               OBJECT CONTROL
+    # ===============================================
     __slots__: set[str] = {
         "_post_id",
         "_message",
@@ -329,6 +461,15 @@ class FacebookPost:
         "_story",
         "_attachments",
         "_created_time",
+        "_reaction_count",
+        "_page_reaction",
+        "_comments",
+        "_can_comment",
+        "_comment_count",
+        "_are_comments_available",
+        "_available_comments_count",
+        "_comments_count",
+        "_shares_count",
         "_access_token",
         "_session",
         "_headers",
@@ -336,8 +477,24 @@ class FacebookPost:
         "_initialized",
     }
 
-    # ========== ATTRIBUTE PROPERTIES ==========
+    @override
+    def __repr__(self) -> str:
+        return (
+            f"FacebookPost("
+            f"post_id={self._post_id}, "
+            f"message={self._message}, "
+            f"status_type={self._status_type}, "
+            f"story={self._story}, "
+            f"attachments={len(self._attachments)}, "
+            f"comments={len(self._comments)}, "
+            f"created_time={self._created_time}, "
+            f"initialized={self._initialized}"
+            f")"
+        )
 
+    # ===============================================
+    #           ATTRIBUTE PROPERTIES
+    # ===============================================
     @property
     def post_id(self) -> str:
         """The `id` of the post."""
@@ -374,7 +531,7 @@ class FacebookPost:
         return self._story
 
     @property
-    def attachments(self) -> list[FacebookPostAttachment] | None:
+    def attachments(self) -> list[FacebookPostAttachment]:
         """The attachments of the post."""
         self._check_initialized()
         return self._attachments
@@ -385,9 +542,65 @@ class FacebookPost:
         self._check_initialized()
         return self._created_time
 
-    # ========== PRIVATE METHODS AND CLASS METHODS ==========
+    @property
+    def reaction_count(self) -> int:
+        """The number of reactions to the post."""
+        self._check_initialized()
+        return self._reaction_count
+
+    @property
+    def is_page_reacted(self) -> bool:
+        """Whether the page reacted to the post."""
+        self._check_initialized()
+        return self._page_reaction is not None
+
+    @property
+    def page_reaction(
+        self,
+    ) -> Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"] | None:
+        """The reaction of the page to the post.
+
+        Raises:
+            Exception: If the page has not reacted to the post.
+
+        """
+        self._check_initialized()
+        return self._page_reaction
+
+    @property
+    def comments(self) -> list["fb_comment.FacebookComment"]:
+        """The comments on the post."""
+        self._check_initialized()
+        return self._comments
+
+    @property
+    def can_comment(self) -> bool:
+        """Whether the post can be commented on."""
+        self._check_initialized()
+        return self._can_comment
+
+    @property
+    def comments_count(self) -> int:
+        """The number of comments on the post."""
+        self._check_initialized()
+        return self._comments_count
+
+    @property
+    def shares_count(self) -> int:
+        """The number of shares on the post."""
+        self._check_initialized()
+        return self._shares_count
+
+    # ===============================================
+    #           PRIVATE METHODS
+    # ===============================================
     def _check_initialized(self):
-        """Check if properties are initialized."""
+        """Check if properties are initialized.
+
+        Raises:
+            Exception: Properties were not initialized.
+
+        """
         if not self._initialized:
             raise Exception(
                 "Properties were not initialized. Consider calling `FacebookPost.initialize_properties()` first."

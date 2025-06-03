@@ -93,7 +93,7 @@ class CommentData(BaseModel):
 class CommentDataSummary(BaseModel):
     """CommentDataSummary object."""
 
-    order: Literal["chronological"]
+    order: Literal["chronological", "ranked"]
     total_count: int
     can_comment: bool
 

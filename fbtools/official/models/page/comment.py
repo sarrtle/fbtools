@@ -6,12 +6,19 @@ handle a comment.
 Add comment, edit comment and delete comment.
 """
 
+# remove warning as it is already solved by importing
+# the parent module instead of importing the object
+# this will only affect the file, not globally
+# pyright: reportImportCycles=false
+
 import asyncio
 from datetime import datetime
 from typing import Literal, override
 from os.path import exists
 import warnings
 from httpx import AsyncClient
+
+import fbtools.official.models.page.post as fb_post
 
 from fbtools.official.models.extra.facebook_comment_models import (
     FacebookCommentAuthor,
@@ -23,7 +30,11 @@ from fbtools.official.models.response.facebook_comment_response import (
     FacebookCommentResponse,
 )
 from fbtools.official.models.response.graph import ObjectIdResponse, SuccessResponse
-from fbtools.official.utilities.common import create_url_format, raise_for_status
+from fbtools.official.utilities.common import (
+    create_comment_fields,
+    create_url_format,
+    raise_for_status,
+)
 from fbtools.official.utilities.graph_util import create_photo_id
 
 
@@ -54,6 +65,7 @@ class FacebookComment:
         access_token: str,
         session: AsyncClient,
         parent_comment: "FacebookComment | None" = None,
+        parent_post: fb_post.FacebookPost | None = None,
     ):
         """Initialize FacebookComment.
 
@@ -62,12 +74,14 @@ class FacebookComment:
             access_token: The access token of the page
             session: The httpx async session
             parent_comment: The parent comment
+            parent_post: The parent post
 
         """
         self._comment_id: str = comment_id
         self._access_token: str = access_token
         self._session: AsyncClient = session
         self._parent_comment: FacebookComment | None = parent_comment
+        self._parent_post: fb_post.FacebookPost | None = parent_post
 
         # initialize attributes that is not their data
         self._message: str | None = None
@@ -89,8 +103,8 @@ class FacebookComment:
     # ===============================================
     #               USEFUL METHODS
     # ===============================================
-    async def update_comment(self, message: str, attachment: str | None = None) -> bool:
-        """Update the comment.
+    async def edit_comment(self, message: str, attachment: str | None = None) -> bool:
+        """Edit the comment.
 
         Message is required since it will be removed when you only update
         the attachment without the message.
@@ -234,6 +248,8 @@ class FacebookComment:
             comment_id=response_object.id,
             access_token=self._access_token,
             session=self._session,
+            parent_comment=self,
+            parent_post=self._parent_post,
         )
 
         # initialize properties
@@ -253,6 +269,9 @@ class FacebookComment:
         self, limit: int | None = None
     ) -> list["FacebookComment"]:
         """Get the reply comments of the comment.
+
+        Notes:
+            Replies are automatically registered into the comment object.
 
         Tips:
             you can use `limit` parameter up to 100 to get all the
@@ -306,6 +325,7 @@ class FacebookComment:
                     access_token=self._access_token,
                     session=self._session,
                     parent_comment=self,
+                    parent_post=self.parent_post,
                 )
                 reply_comment_object.put_initialized_properties(
                     response_object=reply_comment
@@ -388,46 +408,6 @@ class FacebookComment:
         self._parse_response_object(response_object)
 
     # ===============================================
-    #               OBJECT CONTROL
-    # ===============================================
-    __slots__: set[str] = {
-        "_comment_id",
-        "_message",
-        "_access_token",
-        "_session",
-        "_parent_comment",
-        "_reaction_count",
-        "_is_page_reacted",
-        "_page_reaction",
-        "_replies",
-        "_author",
-        "_attachment",
-        "_created_time",
-        "_are_replies_available",
-        "_available_reply_count",
-        "_headers",
-        "_initilized",
-        "_current_reply_after_cursor",
-    }
-
-    @override
-    def __repr__(self) -> str:
-        return (
-            f"FacebookComment("
-            f"comment_id={self._comment_id}, "
-            f"message={self._message}, "
-            f"reaction_count={self._reaction_count}, "
-            f"is_page_reacted={self.is_page_reacted}, "
-            f"page_reaction={self._page_reaction}, "
-            f"replies={self._replies}, "
-            f"author={self._author}, "
-            f"attachment={self._attachment}, "
-            f"created_time={self._created_time}, "
-            f"initialized={self.is_initialized}"
-            f")"
-        )
-
-    # ===============================================
     #           ATTRIBUTE PROPERTIES
     # ===============================================
     @property
@@ -439,6 +419,12 @@ class FacebookComment:
     def parent_comment(self) -> "FacebookComment | None":
         """The parent comment of the comment."""
         return self._parent_comment
+
+    @property
+    def parent_post(self) -> fb_post.FacebookPost | None:
+        """The `id` of the author of the comment."""
+        self._is_initialized()
+        return self._parent_post
 
     @property
     def message(self) -> str | None:
@@ -523,47 +509,9 @@ class FacebookComment:
     # ===============================================
     def _create_params(self) -> dict[str, str]:
         """Create the parameters for the Graph API request."""
-        comment_fields = [
-            "attachment",
-            "created_time",
-            "from",
-            "id",
-            "like_count",
-            "message",
-            "parent",
-            "user_likes",
-            "reactions.summary(true)",
-            "permalink_url",
-            "object",
-            "comments.summary(true)",
-            "likes",
-        ]
-
-        reaction_fields = [
-            "id",
-            "name",
-            "type",
-            "username",
-            "profile_type",
-            "pic_large",
-            "pic_small",
-            "link",
-            "can_post",
-        ]
-
-        # add reaction fields on the comment
-        comment_fields[
-            comment_fields.index("reactions.summary(true)")
-        ] += "{%s}" % ",".join(reaction_fields)
-
-        # add comment fields on the comment
-        comment_fields[
-            comment_fields.index("comments.summary(true)")
-        ] += "{%s}" % ",".join(comment_fields)
-
         params = {
             "access_token": self._access_token,
-            "fields": "%s" % ",".join(comment_fields),
+            "fields": create_comment_fields(),
         }
         return params
 
@@ -642,6 +590,7 @@ class FacebookComment:
                     access_token=self._access_token,
                     session=self._session,
                     parent_comment=self,
+                    parent_post=self._parent_post,
                 )
                 reply_comment_object.put_initialized_properties(response_object=comment)
 
@@ -681,3 +630,46 @@ class FacebookComment:
             return response_object.paging.cursors.after
 
         return None
+
+    # ===============================================
+    #               OBJECT CONTROL
+    # ===============================================
+    __slots__: set[str] = {
+        "_comment_id",
+        "_message",
+        "_access_token",
+        "_session",
+        "_parent_comment",
+        "_parent_post",
+        "_reaction_count",
+        "_is_page_reacted",
+        "_page_reaction",
+        "_replies",
+        "_author",
+        "_attachment",
+        "_created_time",
+        "_are_replies_available",
+        "_available_reply_count",
+        "_headers",
+        "_initilized",
+        "_current_reply_after_cursor",
+    }
+
+    @override
+    def __repr__(self) -> str:
+        return (
+            f"FacebookComment("
+            f"comment_id={self._comment_id}, "
+            f"message={self._message}, "
+            f"reaction_count={self._reaction_count}, "
+            f"is_page_reacted={self.is_page_reacted}, "
+            f"page_reaction={self._page_reaction}, "
+            f"replies={len(self._replies)}, "
+            f"are_replies_available={self._are_replies_available}, "
+            f"available_reply_count={self._available_reply_count}, "
+            f"author={self._author}, "
+            f'attachment={"\"...\"" if self._attachment is not None else "None"}, '
+            f"created_time={self._created_time}, "
+            f"initialized={self.is_initialized}"
+            f")"
+        )
