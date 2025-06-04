@@ -12,6 +12,7 @@ class FacebookCommentResponse(BaseModel):
 
     created_time: datetime
     from_: "CommentFrom | None" = Field(default=None, alias="from")
+    parent: "ParentData | None" = None
     id: str
     reactions: "CommentReaction"
     message: str | None = None
@@ -19,6 +20,15 @@ class FacebookCommentResponse(BaseModel):
     user_likes: bool
     permalink_url: str
     comments: "CommentData | None" = None
+
+
+class ParentData(BaseModel):
+    """ParentData object."""
+
+    created_time: datetime
+    from_: "CommentFrom | None" = Field(default=None, alias="from")
+    message: str
+    id: str
 
 
 class CommentFrom(BaseModel):

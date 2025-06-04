@@ -89,15 +89,16 @@ class FacebookComment:
         self._page_reaction: (
             Literal["LIKE", "LOVE", "CARE", "HAHA", "WOW", "SAD", "ANGRY"] | None
         ) = None
-        self._replies: list[FacebookComment] = []
+        self._replies: dict[str, FacebookComment] = {}
         self._author: FacebookCommentAuthor | None = None
         self._attachment: FacebookCommentAttachment | None = None
         self._created_time: datetime = datetime.now()
         self._are_replies_available: bool = False
+        self._next_replies_available: bool = False
         self._available_reply_count: int = 0
 
         self._headers: dict[str, str] = {"Content-Type": "application/json"}
-        self._initilized: bool = False
+        self._initialized: bool = False
         self._current_reply_after_cursor: str | None = None
 
     # ===============================================
@@ -261,11 +262,11 @@ class FacebookComment:
 
         # update reply count and reply objects
         self._available_reply_count += 1
-        self._replies.append(comment_object)
+        self._replies[comment_object.comment_id] = comment_object
 
         return comment_object
 
-    async def get_reply_comments(
+    async def get_more_reply_comments(
         self, limit: int | None = None
     ) -> list["FacebookComment"]:
         """Get the reply comments of the comment.
@@ -293,7 +294,7 @@ class FacebookComment:
         if not self.are_replies_available:
             raise Exception("No replies available")
 
-        reply_comments: list[FacebookComment] = []
+        reply_comments: dict[str, FacebookComment] = {}
 
         url = create_url_format(f"{self.comment_id}/comments")
         params = self._create_params()
@@ -320,20 +321,47 @@ class FacebookComment:
             response_object: CommentData = CommentData.model_validate(response.json())
 
             for reply_comment in response_object.data:
+                parent_comment = self
+                parent_id = ""
+                if reply_comment.parent != None:
+                    parent_id = reply_comment.parent.id
+
+                if parent_id != self.comment_id:
+                    if parent_id in reply_comments:
+                        parent_comment = reply_comments[parent_id]
+                    elif parent_id in self._replies:
+                        parent_comment = self._replies[parent_id]
+
+                    # This one is not needed since getting all reply comments
+                    # handles all reply comments which means, all reply comments
+                    # are available to be checked using self._replies
+                    # and reply_comments
+                    # else:
+                    # creating a new comment because it might not
+                    # exists on current replies due to cursor pagination
+                    # and this one needs manual initialization
+                    # parent_comment = FacebookComment(
+                    #     comment_id=parent_id,
+                    #     access_token=self._access_token,
+                    #     session=self._session,
+                    #     parent_comment=self,
+                    #     parent_post=self._parent_post,
+                    # )
+
                 reply_comment_object = FacebookComment(
                     comment_id=reply_comment.id,
                     access_token=self._access_token,
                     session=self._session,
-                    parent_comment=self,
+                    parent_comment=parent_comment,
                     parent_post=self.parent_post,
                 )
                 reply_comment_object.put_initialized_properties(
                     response_object=reply_comment
                 )
-                reply_comments.append(reply_comment_object)
+                reply_comments[reply_comment_object.comment_id] = reply_comment_object
 
             # Note: not using the paging.next url because they don't retain
-            #       the same parameters
+            #       the same parameters for fields
             if response_object.paging:
                 self._current_reply_after_cursor = response_object.paging.cursors.after
                 params["after"] = self._current_reply_after_cursor
@@ -346,15 +374,19 @@ class FacebookComment:
 
         # new reply comments will automatically put
         # in the original comment object replies
-        self._replies.extend(reply_comments)
+        self._replies.update(reply_comments)
 
         # update reply data
         self._available_reply_count = self._available_reply_count - len(reply_comments)
-        self._are_replies_available = self._available_reply_count > 0
+        self._next_replies_available = self._available_reply_count > 0
 
         # returning the current requested reply comments for
         # other uses
-        return reply_comments[:limit] if limit else reply_comments
+        return (
+            list(reply_comments.values())[:limit]
+            if limit
+            else list(reply_comments.values())
+        )
 
     async def refresh(self) -> None:
         """Refresh the comment object.
@@ -367,8 +399,8 @@ class FacebookComment:
 
         """
         # reset reply properties
-        self._initilized = False
-        self._replies = []
+        self._initialized = False
+        self._replies = {}
         self._available_reply_count = 0
         self._current_reply_after_cursor = None
 
@@ -376,7 +408,7 @@ class FacebookComment:
 
     async def initialize_properties(self) -> None:
         """Fetch comment data from the Graph API and initialize properties."""
-        if self._initilized:
+        if self._initialized:
             warnings.warn(
                 f"Comment object: {self._comment_id} was already initialized. This method will have no effect"
             )
@@ -461,7 +493,7 @@ class FacebookComment:
     def replies(self) -> list["FacebookComment"]:
         """The replies of the comment."""
         self._is_initialized()
-        return self._replies
+        return list(self._replies.values())
 
     @property
     def author(self) -> FacebookCommentAuthor | None:
@@ -483,6 +515,12 @@ class FacebookComment:
 
     @property
     def are_replies_available(self) -> bool:
+        """Whether the comment has replies."""
+        self._is_initialized()
+        return len(self._replies) > 0
+
+    @property
+    def next_replies_available(self) -> bool:
         """Whether the comment's replies can be retrieved using `get_reply_comments`.
 
         Notes:
@@ -491,7 +529,7 @@ class FacebookComment:
 
         """
         self._is_initialized()
-        return self._are_replies_available
+        return self._next_replies_available
 
     @property
     def available_reply_count(self) -> int:
@@ -502,7 +540,7 @@ class FacebookComment:
     @property
     def is_initialized(self) -> bool:
         """Whether the comment object is initialized."""
-        return self._initilized
+        return self._initialized
 
     # ===============================================
     #           PRIVATE METHODS
@@ -517,7 +555,7 @@ class FacebookComment:
 
     def _is_initialized(self) -> None:
         """Initialize the comment object."""
-        if not self._initilized:
+        if not self._initialized:
             raise Exception("Comment object is not initialized.")
 
     def _parse_attachment(
@@ -585,16 +623,36 @@ class FacebookComment:
         # comment replies
         if response_object.comments != None:
             for comment in response_object.comments.data:
+                parent_comment = self
+                parent_id = ""
+                if comment.parent != None:
+                    parent_id = comment.parent.id
+
+                if parent_id != self.comment_id:
+                    if parent_id in self._replies:
+                        parent_comment = self._replies[parent_id]
+                    else:
+                        # creating a new comment because it might not
+                        # exists on current replies due to cursor pagination
+                        # and this one needs manual initialization
+                        parent_comment = FacebookComment(
+                            comment_id=parent_id,
+                            access_token=self._access_token,
+                            session=self._session,
+                            parent_comment=self,
+                            parent_post=self._parent_post,
+                        )
+
                 reply_comment_object = FacebookComment(
                     comment_id=self.comment_id,
                     access_token=self._access_token,
                     session=self._session,
-                    parent_comment=self,
+                    parent_comment=parent_comment,
                     parent_post=self._parent_post,
                 )
                 reply_comment_object.put_initialized_properties(response_object=comment)
 
-                self._replies.append(reply_comment_object)
+                self._replies[reply_comment_object.comment_id] = reply_comment_object
 
             # available reply count
             self._available_reply_count = (
@@ -602,15 +660,15 @@ class FacebookComment:
             )
 
             # are replies available
-            self._are_replies_available = self._available_reply_count > 0
+            self._next_replies_available = self._available_reply_count > 0
 
-            if response_object.comments.paging and self._are_replies_available:
+            if response_object.comments.paging and self._next_replies_available:
                 self._current_reply_after_cursor = (
                     response_object.comments.paging.cursors.after
                 )
 
         # set as initialized
-        self._initilized = True
+        self._initialized = True
 
     async def _get_next_cursor(self) -> str | None:
         """Get the next cursor of the comment.
@@ -649,9 +707,10 @@ class FacebookComment:
         "_attachment",
         "_created_time",
         "_are_replies_available",
+        "_next_replies_available",
         "_available_reply_count",
         "_headers",
-        "_initilized",
+        "_initialized",
         "_current_reply_after_cursor",
     }
 
@@ -665,7 +724,7 @@ class FacebookComment:
             f"is_page_reacted={self.is_page_reacted}, "
             f"page_reaction={self._page_reaction}, "
             f"replies={len(self._replies)}, "
-            f"are_replies_available={self._are_replies_available}, "
+            f"next_replies_available={self._next_replies_available}, "
             f"available_reply_count={self._available_reply_count}, "
             f"author={self._author}, "
             f'attachment={"\"...\"" if self._attachment is not None else "None"}, '
@@ -673,3 +732,14 @@ class FacebookComment:
             f"initialized={self.is_initialized}"
             f")"
         )
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, str):
+            return (
+                self.comment_id == other
+                or self._message == other
+                or (self._author.name == other if self._author is not None else False)
+            )
+
+        return False

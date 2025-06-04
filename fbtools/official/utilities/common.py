@@ -61,15 +61,15 @@ def raise_for_status(response: Response):
 
 
 def create_comment_fields() -> str:
-    """Create the commenet parameters for the Graph API request."""
+    """Create the comment parameters for the Graph API request."""
     comment_fields = [
-        "attachment",
         "created_time",
+        "parent",
         "from",
         "id",
+        "attachment",
         "like_count",
         "message",
-        "parent",
         "user_likes",
         "reactions.summary(true)",
         "permalink_url",

@@ -61,7 +61,6 @@ class FacebookPost:
             post_id: The `id` of the post.
             access_token: The access token of the page.
             session: The httpx async session.
-            get_comments: If you want to get the comments of the post.
 
         """
         self._post_id: str = post_id

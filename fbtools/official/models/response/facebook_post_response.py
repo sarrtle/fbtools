@@ -52,10 +52,10 @@ class AllCommentCount(BaseModel):
     """Counting all comments using stream."""
 
     data: list[str] = []
-    summary: "SumamryForCount"
+    summary: "SummaryForCount"
 
 
-class SumamryForCount(BaseModel):
+class SummaryForCount(BaseModel):
     """Summary for comment count."""
 
     order: Literal["chronological"]
