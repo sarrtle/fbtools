@@ -95,7 +95,8 @@ class FacebookComment:
         self._created_time: datetime = datetime.now()
         self._are_replies_available: bool = False
         self._next_replies_available: bool = False
-        self._available_reply_count: int = 0
+        self._total_reply_count: int = 0
+        self._next_available_reply_count: int = 0
 
         self._headers: dict[str, str] = {"Content-Type": "application/json"}
         self._initialized: bool = False
@@ -214,54 +215,30 @@ class FacebookComment:
             a FacebookComment object.
 
         """
-        url = create_url_format(f"{self.comment_id}/comments")
-        data: dict[str, str | None] = {}
-        params = {"access_token": self._access_token}
-        session = self._session
-
-        if message != None:
-            data["message"] = message
-
-        if attachment:
-            if attachment.startswith("https://"):
-                data["attachment_url"] = attachment
-            elif exists(attachment):
-                photo_id = await create_photo_id(
-                    photo_url_or_path=attachment,
-                    access_token=self._access_token,
-                    session=session,
-                )
-                data["attachment_id"] = photo_id
-            else:
-                raise ValueError(
-                    "Can't validate your attachment. Please ensure you provided a valid url or file path."
-                )
-        response = await session.post(
-            url=url, params=params, headers=self._headers, json=data
-        )
-        raise_for_status(response)
-
-        response_object: ObjectIdResponse = ObjectIdResponse.model_validate(
-            response.json()
-        )
-
-        comment_object = FacebookComment(
-            comment_id=response_object.id,
+        comment_object = await self.ext_add_comment(
+            id=self.comment_id,
             access_token=self._access_token,
             session=self._session,
+            headers=self._headers,
             parent_comment=self,
             parent_post=self._parent_post,
+            message=message,
+            attachment=attachment,
         )
 
         # initialize properties
         # get the next cursor if available
         self._current_reply_after_cursor, _ = await asyncio.gather(
-            self._get_next_cursor(),
+            self.ext_get_next_cursor(
+                id=self.comment_id,
+                access_token=self._access_token,
+                session=self._session,
+            ),
             comment_object.initialize_properties(),
         )
 
         # update reply count and reply objects
-        self._available_reply_count += 1
+        self._total_reply_count += 1
         self._replies[comment_object.comment_id] = comment_object
 
         return comment_object
@@ -377,8 +354,10 @@ class FacebookComment:
         self._replies.update(reply_comments)
 
         # update reply data
-        self._available_reply_count = self._available_reply_count - len(reply_comments)
-        self._next_replies_available = self._available_reply_count > 0
+        self._next_available_reply_count = self._next_available_reply_count - len(
+            reply_comments
+        )
+        self._next_replies_available = self._next_available_reply_count > 0
 
         # returning the current requested reply comments for
         # other uses
@@ -401,7 +380,6 @@ class FacebookComment:
         # reset reply properties
         self._initialized = False
         self._replies = {}
-        self._available_reply_count = 0
         self._current_reply_after_cursor = None
 
         await self.initialize_properties()
@@ -532,10 +510,31 @@ class FacebookComment:
         return self._next_replies_available
 
     @property
-    def available_reply_count(self) -> int:
+    def total_reply_count(self) -> int:
+        """The total number of replies of the comment.
+
+        Notes:
+            The total number of replies from the facebook comment is not the
+            same as the total number of replies from the current comment object.
+
+            Use `total_available_reply_count` for the total number of replies
+            available on the comment object.
+
+        """
+        self._is_initialized()
+        return self._total_reply_count
+
+    @property
+    def total_available_reply_count(self) -> int:
+        """The total number of replies available on the comment object."""
+        self._is_initialized()
+        return len(self._replies)
+
+    @property
+    def next_available_reply_count(self) -> int:
         """The number of available replies of the comment."""
         self._is_initialized()
-        return self._available_reply_count
+        return self._next_available_reply_count
 
     @property
     def is_initialized(self) -> bool:
@@ -543,8 +542,121 @@ class FacebookComment:
         return self._initialized
 
     # ===============================================
+    #           CLASSMETHODS
+    # ===============================================
+    @classmethod
+    async def ext_add_comment(
+        cls,
+        id: str,
+        access_token: str,
+        session: AsyncClient,
+        headers: dict[str, str],
+        parent_comment: "FacebookComment | None" = None,
+        parent_post: fb_post.FacebookPost | None = None,
+        message: str | None = None,
+        attachment: str | None = None,
+    ) -> "FacebookComment":
+        """Add comment request object.
+
+        Warning:
+            Do not use this method directly from your code outside.
+            This method is an internal helper for the official Facebook Post
+            and Comment object.
+
+        Args:
+            id: The `id` of the post.
+            access_token: The access token of the page.
+            session: The httpx async session.
+            headers: The headers of the request.
+            parent_comment: The parent comment of the comment.
+            parent_post: The parent post of the comment.
+            message: The message written in the comment.
+            attachment: If you wish to add images/videos to the comment.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+            ValueError: If you did not provide either message or attachment.
+
+        Returns:
+            a FacebookComment object.
+
+        """
+        url = create_url_format(f"{id}/comments")
+        data: dict[str, str | None] = {}
+        params = {"access_token": access_token}
+
+        if message != None:
+            data["message"] = message
+
+        if attachment:
+            if attachment.startswith("https://"):
+                data["attachment_url"] = attachment
+            elif exists(attachment):
+                photo_id = await create_photo_id(
+                    photo_url_or_path=attachment,
+                    access_token=access_token,
+                    session=session,
+                )
+                data["attachment_id"] = photo_id
+            else:
+                raise ValueError(
+                    "Can't validate your attachment. Please ensure you provided a valid url or file path."
+                )
+
+        response = await session.post(
+            url=url, params=params, headers=headers, json=data
+        )
+        raise_for_status(response)
+
+        response_object: ObjectIdResponse = ObjectIdResponse.model_validate(
+            response.json()
+        )
+
+        comment_object = FacebookComment(
+            comment_id=response_object.id,
+            access_token=access_token,
+            session=session,
+            parent_comment=parent_comment,
+            parent_post=parent_post,
+        )
+
+        return comment_object
+
+    @classmethod
+    async def ext_get_next_cursor(
+        cls, id: str, access_token: str, session: AsyncClient
+    ) -> str | None:
+        """Get the next cursor of the comment.
+
+        Will return `None` if there are no `next` object
+        instead of getting only the `after` object.
+
+        Warning:
+            Do not use this method directly from your code outside.
+            This method is an internal helper for the official Facebook Post
+            and Comment object.
+
+        Args:
+            id: The `id` of the post.
+            access_token: The access token of the page.
+            session: The httpx async session.
+
+        """
+        url = create_url_format(f"{id}/comments")
+        params = {"access_token": access_token, "summary": "true", "limit": 0}
+        response = await session.get(url, params=params)
+
+        response_object = CommentData.model_validate(response.json())
+
+        if response_object.paging and response_object.paging.next:
+            return response_object.paging.cursors.after
+
+        return None
+
+    # ===============================================
     #           PRIVATE METHODS
     # ===============================================
+
     def _create_params(self) -> dict[str, str]:
         """Create the parameters for the Graph API request."""
         params = {
@@ -654,13 +766,16 @@ class FacebookComment:
 
                 self._replies[reply_comment_object.comment_id] = reply_comment_object
 
+            # overall reply count
+            self._total_reply_count = response_object.comments.summary.total_count
+
             # available reply count
-            self._available_reply_count = (
-                response_object.comments.summary.total_count - len(self._replies)
+            self._next_available_reply_count = self._total_reply_count - len(
+                self._replies
             )
 
             # are replies available
-            self._next_replies_available = self._available_reply_count > 0
+            self._next_replies_available = self._next_available_reply_count > 0
 
             if response_object.comments.paging and self._next_replies_available:
                 self._current_reply_after_cursor = (
@@ -669,25 +784,6 @@ class FacebookComment:
 
         # set as initialized
         self._initialized = True
-
-    async def _get_next_cursor(self) -> str | None:
-        """Get the next cursor of the comment.
-
-        Will return `None` if there are no `next`
-        object instead of getting only the `after`
-        object.
-        """
-        url = create_url_format(f"{self.comment_id}/comments")
-        params = self._create_params()
-        params["summary"] = "true"
-        response = await self._session.get(url, params=params)
-
-        response_object = CommentData.model_validate(response.json())
-
-        if response_object.paging and response_object.paging.next:
-            return response_object.paging.cursors.after
-
-        return None
 
     # ===============================================
     #               OBJECT CONTROL
@@ -708,7 +804,8 @@ class FacebookComment:
         "_created_time",
         "_are_replies_available",
         "_next_replies_available",
-        "_available_reply_count",
+        "_total_reply_count",
+        "_next_available_reply_count",
         "_headers",
         "_initialized",
         "_current_reply_after_cursor",
@@ -725,7 +822,8 @@ class FacebookComment:
             f"page_reaction={self._page_reaction}, "
             f"replies={len(self._replies)}, "
             f"next_replies_available={self._next_replies_available}, "
-            f"available_reply_count={self._available_reply_count}, "
+            f"total_reply_count={self._total_reply_count}, "
+            f"available_reply_count={self._next_available_reply_count}, "
             f"author={self._author}, "
             f'attachment={"\"...\"" if self._attachment is not None else "None"}, '
             f"created_time={self._created_time}, "

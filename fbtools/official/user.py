@@ -34,7 +34,9 @@ class User:
         self.access_token: str | None = None
 
         # objects
-        self.session: AsyncClient = AsyncClient(base_url="https://graph.facebook.com/")
+        self.session: AsyncClient = AsyncClient(
+            base_url="https://graph.facebook.com/", timeout=60
+        )
 
     # login methods
     async def login_with_access_token(

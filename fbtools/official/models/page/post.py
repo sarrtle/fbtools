@@ -6,6 +6,7 @@ handle a post.
 Add post, edit post and delete post.
 """
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Literal, cast, override
 import json
@@ -17,6 +18,7 @@ import fbtools.official.models.page.comment as fb_comment
 from fbtools.official.models.extra.facebook_post_attachment import (
     FacebookPostAttachment,
 )
+from fbtools.official.models.response.facebook_comment_response import CommentData
 from fbtools.official.models.response.facebook_post_response import (
     AllCommentCount,
     BatchResponseForCommentCount,
@@ -88,8 +90,10 @@ class FacebookPost:
         self._comments: list[fb_comment.FacebookComment] = []
         self._can_comment: bool = False
         self._are_comments_available: bool = False
-        self._available_comments_count: int = 0
-        self._comments_count: int = 0
+        self._next_comments_available: bool = False
+        self._next_available_comments_count: int = 0
+        self._total_comments_count: int = 0
+        self._toplevel_comments_count: int = 0
         self._shares_count: int = 0
 
         self._access_token: str = access_token
@@ -100,6 +104,8 @@ class FacebookPost:
 
         # important attributes
         self._initialized: bool = False
+        self._current_comment_after_cursor: str | None = None
+        self._required_comments: bool = False
 
     # ===============================================
     #               USEFUL METHODS
@@ -171,25 +177,165 @@ class FacebookPost:
         response_data: SuccessResponse = SuccessResponse.model_validate(response.json())
         return response_data.success
 
-    async def get_comments(self) -> "FacebookPost":
+    async def add_comment(
+        self, message: str | None = None, attachment: str | None = None
+    ) -> "fb_comment.FacebookComment":
+        """Add a comment to the post.
+
+        Args:
+            message: The message written in the comment.
+            attachment: If you wish to add images/videos to the comment.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+            ValueError: If you did not provide either message or attachment.
+
+        Returns:
+            a FacebookComment object.
+
+        """
+        comment_object = await fb_comment.FacebookComment.ext_add_comment(
+            id=self._post_id,
+            access_token=self._access_token,
+            session=self._session,
+            headers=self._headers,
+            parent_comment=None,
+            parent_post=self,
+            message=message,
+            attachment=attachment,
+        )
+
+        # initialize_properties
+        # and get the next cursor if available
+        self._current_comment_after_cursor, _ = await asyncio.gather(
+            fb_comment.FacebookComment.ext_get_next_cursor(
+                id=self._post_id, access_token=self._access_token, session=self._session
+            ),
+            comment_object.initialize_properties(),
+        )
+
+        # update comment count
+        self._toplevel_comments_count += 1
+        self._total_comments_count += 1
+        self._comments.append(comment_object)
+
+        return comment_object
+
+    async def get_more_comments(
+        self, limit: int | None = None
+    ) -> list["fb_comment.FacebookComment"]:
         """Get the comments of the post.
 
         Will append the comments to the comments attribute.
+
+        Tips:
+            You can use `limit` paramaeter up to 100 to get all the comments in
+            one scope, then another 100 later if there are more comments available.
+
+        Args:
+            limit: The maximum number of comments to return.
+
+        Raises:
+            ValidationError: If something went wrong during validation of api response.
+            HttpStatusError: If something went wrong during request.
+
+        Returns:
+            A list of comments.
+
         """
-        raise NotImplementedError
+        if not self._are_comments_available:
+            raise Exception("No comments available.")
+
+        comments: list[fb_comment.FacebookComment] = []
+
+        url = create_url_format(f"{self._post_id}/comments")
+        params = {
+            "access_token": self._access_token,
+            "fields": create_comment_fields(),
+            "summary": "true",
+        }
+        next = True
+
+        # apply the current after cursor if it exists
+        # so we will immediately get hte next comments
+        # instead of existing ones
+        if self._current_comment_after_cursor:
+            params["after"] = self._current_comment_after_cursor
+
+        # apply limit
+        if limit != None:
+            params["limit"] = str(limit)
+
+        while next == True and len(comments) < limit if limit else True:
+            response = await self._session.get(
+                url=url, params=params, headers=self._headers
+            )
+            raise_for_status(response)
+            response_object: CommentData = CommentData.model_validate(response.json())
+
+            for comment in response_object.data:
+                comment_object = fb_comment.FacebookComment(
+                    comment_id=comment.id,
+                    access_token=self._access_token,
+                    session=self._session,
+                    parent_comment=None,
+                    parent_post=self,
+                )
+                comment_object.put_initialized_properties(comment)
+                comments.append(comment_object)
+
+            # Note: not using the paging.next url because they don't retain
+            #       the same parameters for fields
+
+            if response_object.paging:
+                self._current_comment_after_cursor = (
+                    response_object.paging.cursors.after
+                )
+                params["after"] = self._current_comment_after_cursor
+                next = response_object.paging.next is not None
+            else:
+                next = False
+
+            if limit == None and next == False:
+                break
+
+        # new comments will automatically put in the original comment list
+        self._comments.extend(comments)
+
+        # update facebook post indicators
+        self._next_available_comments_count = self._next_available_comments_count - len(
+            comments
+        )
+        self._next_comments_available = self._next_available_comments_count > 0
+
+        # returning the current requested comments for other uses
+        return comments[:limit] if limit else comments
 
     async def get_likes(self) -> "FacebookPost":
         """Get the likes of the post."""
         raise NotImplementedError
 
-    async def refresh(self) -> None:
+    async def refresh(self, get_comments: bool = False) -> None:
         """Refresh the post object.
 
         Warning:
-            Doing this will reset the post object.
+            Doing this will reset the post object. Its comment objects will
+            also be reset until to its maximum limited number. You need to
+            run `get_more_comments` again to get the all or some of the
+            comments left.
+
+        Notes:
+            If you already indicated to get_comments from first prior initialization,
+            there is no need to indicate get_comments on refresh method.
+
+        Args:
+            get_comments: Optionally if you want to get the comments of the post during refresh.
 
         """
-        await self.initialize_properties()
+        # reset post properties
+        self._initialized = False
+        self._current_comment_after_cursor = None
+        await self.initialize_properties(self._required_comments or get_comments)
 
     async def initialize_properties(self, get_comments: bool = False) -> None:
         """Fetch post data from the Graph API and initialize its properties.
@@ -202,6 +348,7 @@ class FacebookPost:
             get_comments: If you want to get the comments of the post.
 
         """
+        self._required_comments = get_comments
         url = create_url_format(self.post_id)
         fields = [
             "id",
@@ -218,6 +365,9 @@ class FacebookPost:
         # additional params for comments
         if get_comments:
             fields.append("comments.summary(true){%s}" % create_comment_fields())
+        else:
+            # still get comment but count only and no data
+            fields.append("comments.summary(true).limit(0).filter(toplevel)")
 
         # create fields
         request_field = ", ".join(fields)
@@ -409,6 +559,7 @@ class FacebookPost:
             facebook_post.status_type = "bio_status_update"
 
         # process comments
+        facebook_comments: list[fb_comment.FacebookComment] = []
         if facebook_post.comments:
             for comment in facebook_post.comments.data:
                 comment_object = fb_comment.FacebookComment(
@@ -420,12 +571,13 @@ class FacebookPost:
                 )
                 comment_object.put_initialized_properties(comment)
 
-                # print(len(cdt))
+                facebook_comments.append(comment_object)
 
-                self._comments.append(comment_object)
+            # toplevel comment count
+            self._toplevel_comments_count = facebook_post.comments.summary.total_count
 
         # comment count
-        self._comments_count = facebook_comment_all_count.summary.total_count
+        self._total_comments_count = facebook_comment_all_count.summary.total_count
 
         # reaction count
         if facebook_post.reactions:
@@ -441,6 +593,21 @@ class FacebookPost:
 
         # indicator
         self._can_comment = facebook_comment_all_count.summary.can_comment
+        self._are_comments_available = self._toplevel_comments_count > 0
+        self._next_available_comments_count = self._toplevel_comments_count - len(
+            facebook_comments
+        )
+        self._next_comments_available = self._next_available_comments_count > 0
+
+        # add paging cursor of comments
+        if (
+            facebook_post.comments
+            and facebook_post.comments.paging
+            and self._next_comments_available
+        ):
+            self._current_comment_after_cursor = (
+                facebook_post.comments.paging.cursors.after
+            )
 
         # add them to their attributes
         self._message = facebook_post.message
@@ -448,6 +615,7 @@ class FacebookPost:
         self._story = facebook_post.story
         self._created_time = facebook_post.created_time
         self._attachments = attachments
+        self._comments = facebook_comments
         self._initialized = True
 
     # ===============================================
@@ -466,14 +634,19 @@ class FacebookPost:
         "_can_comment",
         "_comment_count",
         "_are_comments_available",
-        "_available_comments_count",
+        "_next_comments_available",
+        "_next_available_comments_count",
         "_comments_count",
+        "_toplevel_comments_count",
+        "_total_comments_count",
         "_shares_count",
         "_access_token",
         "_session",
         "_headers",
         "_url",
         "_initialized",
+        "_current_comment_after_cursor",
+        "_required_comments",
     }
 
     @override
@@ -579,10 +752,43 @@ class FacebookPost:
         return self._can_comment
 
     @property
-    def comments_count(self) -> int:
-        """The number of comments on the post."""
+    def total_comments_count(self) -> int:
+        """The number of comments on the post.
+
+        Notes:
+            The total number of comments from the facebook post is not the
+            same as the total number of comments from the current post object.
+
+            Use `total_available_comments_count` for the total number of comments
+            available on the post object.
+
+        """
         self._check_initialized()
-        return self._comments_count
+        return self._total_comments_count
+
+    @property
+    def total_available_comments_count(self) -> int:
+        """The total number of comments available on the post."""
+        self._check_initialized()
+        return len(self._comments)
+
+    @property
+    def are_comments_available(self) -> bool:
+        """Whether are more comments on a post."""
+        self._check_initialized()
+        return self._are_comments_available
+
+    @property
+    def next_comments_available(self) -> bool:
+        """Whether there are more comments available."""
+        self._check_initialized()
+        return self._next_comments_available
+
+    @property
+    def next_available_comments_count(self) -> int:
+        """The number of available comments on the post."""
+        self._check_initialized()
+        return self._next_available_comments_count
 
     @property
     def shares_count(self) -> int:

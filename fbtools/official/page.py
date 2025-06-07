@@ -53,7 +53,7 @@ class Page:
     @classmethod
     def create_session(cls):
         """Create httpx async session of this node."""
-        return AsyncClient(base_url="https://graph.facebook.com/")
+        return AsyncClient(base_url="https://graph.facebook.com/", timeout=60)
 
     @classmethod
     async def from_access_token(
@@ -251,7 +251,7 @@ class Page:
             "message": message,
             "published": True,
             # schedule
-            # schedulue: "unix_timestamp_of_future_date"
+            # schedule: "unix_timestamp_of_future_date"
         }
         params = {"access_token": self.access_token}
 
