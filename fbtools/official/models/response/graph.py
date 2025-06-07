@@ -105,6 +105,7 @@ class VideoUploadingStatus(BaseModel):
     bytes_transfered: int | None = None
     source_file_size: int | None = None
     error: "VideoUploadError | None" = None
+    errors: list["ErrorData"] | None = None
 
 
 class VideoProcessingStatus(BaseModel):
@@ -112,6 +113,9 @@ class VideoProcessingStatus(BaseModel):
 
     status: VIDEOSTATUSTYPE
     error: "VideoUploadError | None" = None
+
+    # separate error for reels
+    errors: list["ErrorData"] | None = None
 
 
 class VideoPublishingStatus(BaseModel):
@@ -122,8 +126,18 @@ class VideoPublishingStatus(BaseModel):
     publishing_time: datetime | None = None
     error: "VideoUploadError | None" = None
 
+    # separate error for reels
+    errors: list["ErrorData"] | None = None
+
 
 class VideoUploadError(BaseModel):
     """Error of a video upload."""
 
+    message: str
+
+
+class ErrorData(BaseModel):
+    """Error of a video upload."""
+
+    code: int
     message: str

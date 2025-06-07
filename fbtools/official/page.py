@@ -18,6 +18,7 @@ from fbtools.official.models.validation.page_response import PageDataItem
 
 
 from fbtools.official.utilities.common import create_url_format, raise_for_status
+from fbtools.official.utilities.global_instances import GraphApiVersion
 from fbtools.official.utilities.graph_util import create_photo_id
 
 
@@ -80,7 +81,7 @@ class Page:
         # request page data from official api with access token
         params = {
             "access_token": page_access_token,
-            "fields": "id,name,category, access_token",
+            "fields": "id,name,category,access_token",
         }
         response = await cls.create_session().get(f"{user_id}", params=params)
 
@@ -483,20 +484,7 @@ class Page:
             params = {"access_token": self.access_token, "fields": "status"}
 
             # wait for the video to be published
-            while True:
-                response = await self.session.get(url=url, params=params)
-                video_upload_status = VideoUploadStatus.model_validate(response.json())
-
-                if video_upload_status.status.video_status == "ready":
-                    break
-
-                if video_upload_status.status.error is not None:
-                    raise Exception(
-                        "Failed to upload video. "
-                        + video_upload_status.status.error.message
-                    )
-
-                await asyncio.sleep(1)
+            await self._wait_video_upload_ready(url, params, wait_type="ready")
 
             params["fields"] = "post_id"
             response = await self.session.get(url=url, params=params)
@@ -516,6 +504,210 @@ class Page:
                 session=self.session,
             )
 
+    # ===== Upload a reels =====
+    async def create_video_reels(
+        self,
+        filepath_or_url: str,
+        description: str,
+        user_id: str | Literal["me"] = "me",
+        progress_callback: (
+            Callable[
+                [float, float, float, Literal["uploading", "publishing", "finished"]],
+                Coroutine[None, None, None],
+            ]
+            | None
+        ) = None,
+    ) -> FacebookPost:
+        """Create a reel post.
+
+        Notes:
+            Title kinda doesn't matter for reels, what always have shown is
+            the text from the description.
+
+        Notes:
+            About their documentation:
+            https://developers.facebook.com/docs/video-api/guides/reels-publishing
+
+        Args:
+            filepath_or_url: The local file path or url of the video.
+            description: The description of the video reel.
+            user_id: The user id or "me". The "me" is used on dev/solo mode.
+            progress_callback: The progress callback function.
+
+        Raises:
+            HttpStatusError: If http status code is not 200.
+
+        Returns:
+            The FacebookPost object.
+
+        """
+        url = create_url_format(f"{user_id}/video_reels")
+
+        # first step
+        # creating upload session
+        data = {"upload_phase": "start", "access_token": self.access_token}
+        response = await self.session.post(url=url, data=data)
+        raise_for_status(response)
+
+        upload_session: dict[str, str] = response.json()
+
+        if "video_id" not in upload_session and "upload_url" not in upload_session:
+            raise Exception("Failed to create upload session. " + str(response.text))
+
+        video_id = upload_session["video_id"]
+        upload_url = upload_session["upload_url"]
+
+        # upload from local file
+        upload_url = f"https://rupload.facebook.com/video-upload/{GraphApiVersion.get_version()}/{video_id}"
+        headers = {
+            "Authorization": f"OAuth {self.access_token}",
+            "offset": "0",
+        }
+
+        if progress_callback is not None:
+            await progress_callback(0, 0, 0, "uploading")
+
+        if exists(filepath_or_url):
+            filesize = getsize(filepath_or_url)
+            headers["file_size"] = str(filesize)
+            headers["Content-Type"] = "application/octet-stream"
+            async with aopen(filepath_or_url, "rb") as f:
+                binary_data = await f.read()
+            response = await self.session.post(
+                url=upload_url, headers=headers, content=binary_data
+            )
+            raise_for_status(response)
+
+        # upload from url
+        elif filepath_or_url.startswith("http"):
+            headers["file_url"] = filepath_or_url
+
+            response = await self.session.post(url=upload_url, headers=headers)
+            raise_for_status(response)
+
+        else:
+            raise Exception(f"Please input a valid filepath or url. {filepath_or_url}")
+
+        response_data: dict[str, str] = response.json()
+
+        if "success" not in response_data:
+            raise Exception("Failed to upload video. " + str(response.text))
+
+        # step 2
+        # wait for the video to be ready
+        await self._wait_video_upload_ready(
+            url=create_url_format(video_id),
+            params={"fields": "status", "access_token": self.access_token},
+            wait_type="upload_complete",
+        )
+
+        # step 3
+        # publishing
+        url = create_url_format(f"{user_id}/video_reels")
+
+        parameters = {
+            "access_token": self.access_token,
+            "video_id": video_id,
+            "upload_phase": "finish",
+            "video_state": "PUBLISHED",
+            "description": description,
+        }
+
+        if progress_callback is not None:
+            await progress_callback(0, 0, 0, "publishing")
+
+        response = await self.session.post(url=url, params=parameters)
+        raise_for_status(response)
+
+        response_data = response.json()
+
+        if "success" not in response_data:
+            raise Exception("Failed to publish video. " + str(response.text))
+
+        if "post_id" not in response_data:
+            raise Exception(
+                "Failed to find post id after publishing the video. "
+                + str(response.text)
+            )
+
+        post_id = response_data["post_id"]
+        await self._wait_video_upload_ready(
+            url=create_url_format(video_id),
+            params={"fields": "status", "access_token": self.access_token},
+            wait_type="ready",
+        )
+
+        if progress_callback is not None:
+            await progress_callback(0, 0, 0, "finished")
+        post_object = FacebookPost(
+            post_id=f"{self.page_id}_{post_id}",
+            access_token=self.access_token,
+            session=self.session,
+        )
+
+        return post_object
+
     @override
     def __repr__(self):
         return f"Page(name={self.name}, category={self.category}, access_token={self.access_token[:5]}...)"
+
+    # ===============================
+    #     PRIVATE METHODS
+    # ===============================
+
+    async def _wait_video_upload_ready(
+        self,
+        url: str,
+        params: dict[str, str],
+        wait_type: Literal["ready", "upload_complete"],
+    ):
+        """Wait for video upload to be ready."""
+        while True:
+            response = await self.session.get(url=url, params=params)
+            video_upload_status = VideoUploadStatus.model_validate(response.json())
+
+            bytes_transferred = (
+                video_upload_status.status.uploading_phase.bytes_transfered
+            )
+            total_size = video_upload_status.status.uploading_phase.source_file_size
+
+            if (
+                bytes_transferred is not None
+                and total_size is not None
+                and bytes_transferred > 0
+                and total_size > 0
+            ):
+                _percentage = (bytes_transferred / total_size) * 100
+                # TODO: add callback algorithm here
+
+            # print("video status: ", video_upload_status.status.video_status)
+            # print(
+            #     "uploading phase: ", video_upload_status.status.uploading_phase.status
+            # )
+            # print(
+            #     "publishing phase: ", video_upload_status.status.publishing_phase.status
+            # )
+            # print("error: ", video_upload_status.status.error)
+            if video_upload_status.status.video_status == "error":
+                # check who got errors
+                errors: list[str] = []
+                if video_upload_status.status.uploading_phase.errors is not None:
+                    for error in video_upload_status.status.uploading_phase.errors:
+                        errors.append(error.message + " code: " + str(error.code))
+                elif video_upload_status.status.processing_phase.errors is not None:
+                    for error in video_upload_status.status.processing_phase.errors:
+                        errors.append(error.message + " code: " + str(error.code))
+
+                raise Exception("Failed to upload video.\n" + ", ".join(errors))
+
+            if video_upload_status.status.video_status == wait_type:
+                return
+
+            if video_upload_status.status.error is not None:
+                raise Exception(
+                    "Failed to upload video. "
+                    + video_upload_status.status.error.message
+                )
+
+            # avoid fast loop
+            await asyncio.sleep(1)
