@@ -65,7 +65,7 @@ class FacebookComment:
         access_token: str,
         session: AsyncClient,
         parent_comment: "FacebookComment | None" = None,
-        parent_post: fb_post.FacebookPost | None = None,
+        parent_post: "fb_post.FacebookPost | None" = None,
     ):
         """Initialize FacebookComment.
 
@@ -431,7 +431,7 @@ class FacebookComment:
         return self._parent_comment
 
     @property
-    def parent_post(self) -> fb_post.FacebookPost | None:
+    def parent_post(self) -> "fb_post.FacebookPost | None":
         """The `id` of the author of the comment."""
         self._is_initialized()
         return self._parent_post
@@ -552,7 +552,7 @@ class FacebookComment:
         session: AsyncClient,
         headers: dict[str, str],
         parent_comment: "FacebookComment | None" = None,
-        parent_post: fb_post.FacebookPost | None = None,
+        parent_post: "fb_post.FacebookPost | None" = None,
         message: str | None = None,
         attachment: str | None = None,
     ) -> "FacebookComment":
