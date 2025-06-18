@@ -7,14 +7,16 @@ Docs references:
 1. https://developers.facebook.com/docs/messenger-platform/send-messages/
 """
 
-from os.path import exists
 from typing import Literal
+from fbtools.official.models.extra.facebook_message_attachment import (
+    FbMessageAttachment_Dict,
+)
 from fbtools.official.models.response.facebook_message_response import (
     FacebookMessageResponse,
 )
-from fbtools.official.utilities.common import create_url_format
+from fbtools.official.utilities.common import create_url_format, get_attachment_mimetype
 
-from httpx import AsyncClient
+from httpx import AsyncClient, HTTPStatusError
 
 
 class FacebookMessage:
@@ -58,46 +60,114 @@ class FacebookMessage:
 
     # PUBlIC METHODS
     # ----------------------------------------
-    async def send_text(
-        self, text: str | None = None, attachments: str | list[str] | None = None
-    ) -> "FacebookMessage":
+    async def send_text(self, text: str) -> "FacebookMessage":
         """Send a normal text.
+
+        Notes:
+            Why this is separated from send_attachment is because you can only
+            send one message type at once like if it is a text then it is a text,
+            if it is an attachment then it is an attachment.
 
         Args:
             text: The text of the message
             attachments: The attachments of the message that can be url, file, attachment id
 
         """
-        data: dict[str, object] = {}
-        data["message"] = {}
-        attachment_data: list[dict[str, object]] = []
+        data: dict[str, object] = {"message": {"text": text}}
+
+        facebook_message_object = await self._send_api(data)
+        return facebook_message_object
+
+    async def send_attachment(
+        self,
+        attachments: (
+            str | FbMessageAttachment_Dict | list[str | FbMessageAttachment_Dict]
+        ),
+    ) -> "FacebookMessage":
+        """Send an attachment to Facebook messenger.
+
+        Notes:
+            You can also send multiple attachments at once.
+
+        Notes:
+            The method of sending an attachment is separated for
+            following reasons:
+            1. You are sending repeated images like banner, notification and
+                you are sure that the attachment url is stable and it is the
+                type that you are expecting. This is fast and reliable so
+                performance matters in your code but this is unsafe and you
+                are expecting an error after sending an API request to facebook
+                if something went wrong with the attachment url you used.
+                - use dictionary format
+            2. You just want to provide a string url or filepath or attachment id
+                or you don't know what type of the attachment you are sending.
+                The algorithm will handle attachment type for you. It can give you
+                early errors and it has a network overhead if attachment url and
+                attachment id but none on local file.
+
+                You can send an attachment url, filepath, attachment id or you don't know what type
+                - use list of string
+
+        Notes:
+            One error from the attachment provided will fail the rest. This to ensure that all
+            attachments are sent properly and developers should be responsible for using a
+            stable image source.
+
+        Args:
+            attachments: The attachments of the message that can be url, file, attachment id
+
+        Returns:
+            a FacebookMessage object
+
+        """
+        attachment_data_list: list[dict[str, object]] = []
 
         if not isinstance(attachments, list):
-            attachments = [attachments] if attachments is not None else []
-
-        data.update({"message": {"text": text if text is not None else ""}})
+            attachments = [attachments]
 
         for attachment in attachments:
-            # separately preprocess the local file
-            # - url
-            if attachment.startswith("http"):
-                attachment_data.append(
-                    {"type": "image", "payload": {"url": attachment}}
-                )
-            # - attachment id
-            elif attachment.isdigit():
-                attachment_data.append(
-                    {"type": "image", "payload": {"attachment_id": attachment}}
-                )
-            # - local file
-            elif exists(attachment):
-                # TODO: upload local file, implement asynchronous upload if many local file
-                raise NotImplementedError
-            else:
-                raise Exception(f"Attachment {attachment} is not valid.")
+            if isinstance(attachment, str):
+                try:
+                    attachment_type = await get_attachment_mimetype(
+                        attachment=attachment, session=self._session
+                    )
 
-        if len(attachment_data) > 0:
-            data["message"].update({"attachments": attachment_data})
+                except HTTPStatusError as hse:
+                    raise Exception(
+                        "Something went wrong from requesting to image url header"
+                        + f"\n{hse}"
+                    )
+                except Exception:
+                    raise Exception(
+                        "Invalid attachment source. Check if it is really a valid url or a valid local path."
+                    )
+
+                # TODO: check if local file, needs to upload the local file to
+                #       facebook server and get the attachment id
+                attachment_data_list.append(
+                    {
+                        "type": attachment_type,
+                        "payload": {"url": attachment, "is_reusable": True},
+                    }
+                )
+            else:
+                # validate
+                if (
+                    "source" not in attachment.keys()
+                    and "attachment_type" not in attachment.keys()
+                ):
+                    raise Exception(
+                        "Invalid attachment type, please use the proper dictionary format."
+                    )
+
+                attachment_data_list.append(
+                    {
+                        "type": attachment["attachment_type"],
+                        "payload": {"url": attachment["source"], "is_reusable": True},
+                    }
+                )
+
+        data: dict[str, object] = {"message": {"attachments": attachment_data_list}}
 
         facebook_message_object = await self._send_api(data)
         return facebook_message_object
