@@ -1,5 +1,23 @@
 """Global instances reusable for fbtools official graph."""
 
+from cachetools import TTLCache
+
+
+class Cache:
+    """Cache object."""
+
+    _cache: TTLCache[str, int] = TTLCache(maxsize=1024, ttl=60 * 60 * 24)
+
+    @classmethod
+    def set_cache(cls, maxsize: int, ttl: int):
+        """Set cache."""
+        cls._cache = TTLCache(maxsize=maxsize, ttl=ttl)
+
+    @classmethod
+    def get_cache(cls) -> TTLCache[str, int]:
+        """Get cache."""
+        return cls._cache
+
 
 class GraphApiVersion:
     """GraphApiVersion object.

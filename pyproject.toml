@@ -9,6 +9,7 @@ dependencies = [
     "cachetools>=5.5.2",
     "fastapi>=0.115.8",
     "httpx>=0.28.1",
+    "types-aiofiles>=24.1.0.20250606",
     "uvicorn>=0.34.0",
 ]
 

@@ -1,16 +1,17 @@
 """All common utility functions for official APIs."""
 
 import mimetypes
-from typing import cast
+from typing import Hashable, cast
 from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncGenerator
 from os.path import exists
 from urllib.parse import urlparse
 from aiofiles import open as aopen
 
+from cachetools import cached
 from httpx import AsyncClient, HTTPStatusError, Response
 
-from fbtools.official.utilities.global_instances import GraphApiVersion
+from fbtools.official.utilities.global_instances import Cache, GraphApiVersion
 
 CHUNK_SIZE = 4 * 1024 * 1024
 
@@ -107,18 +108,26 @@ def create_comment_fields() -> str:
     return ",".join(comment_fields)
 
 
-async def get_attachment_mimetype(attachment: str, session: AsyncClient):
+def _attachment_key(attachment: str, **_kwargs: Hashable) -> str:
+    return attachment
+
+
+@cached(cache=Cache.get_cache(), key=_attachment_key)
+async def get_attachment_mimetype(
+    attachment: str, session: AsyncClient
+) -> tuple[str, str]:
     """Get the mimetype of the attachment.
 
     It supports all kind of attachment like attachment url, local file or an
     attachment id,
     """
+    print("Running get_attachment_mimetype")
     # custom header for anti robots
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0"
     }
     # to return
-    mimetype = ""
+    mimetype_value: tuple[str, str] = ("", "")
 
     if attachment.startswith("https://"):
         response = await session.head(url=attachment, headers=headers)
@@ -127,7 +136,7 @@ async def get_attachment_mimetype(attachment: str, session: AsyncClient):
             # - using cast to silent linters because we know that we are
             #   getting a string
             content_type = cast(str, response.headers.get("Content-Type", ""))
-            mimetype = content_type.split("/")[0]
+            mimetype_value = (content_type.split("/")[0], content_type)
         except HTTPStatusError as hse:
             # fallback to detecting extension from url
             parse_url = urlparse(attachment)
@@ -138,18 +147,19 @@ async def get_attachment_mimetype(attachment: str, session: AsyncClient):
             if mimetype is None:
                 raise Exception(f"Could not determine mimetype from url\n{hse}")
 
-            mimetype = mimetype.split("/")[0]
+            mimetype_value = (mimetype.split("/")[0], mimetype)
     elif exists(attachment):
         mimetype, _ = mimetypes.guess_type(attachment)
 
         if mimetype is None:
             raise Exception("Could not determine mimetype from attachment file.")
 
-        mimetype = mimetype.split("/")[0]
+        mimetype_value = (mimetype.split("/")[0], mimetype)
     elif attachment.isdigit():
-        # TODO: request on facebook graph API
-        pass
+        raise Exception(
+            "Attachment id is not supported. Use dictionary format instead and you must provide your own mimetype."
+        )
     else:
         raise Exception("Invalid attachment source.")
 
-    return mimetype
+    return mimetype_value
