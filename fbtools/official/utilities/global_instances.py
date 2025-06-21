@@ -1,12 +1,13 @@
 """Global instances reusable for fbtools official graph."""
 
+from asyncio import Future
 from cachetools import TTLCache
 
 
 class Cache:
     """Cache object."""
 
-    _cache: TTLCache[str, int] = TTLCache(maxsize=1024, ttl=60 * 60 * 24)
+    _cache: TTLCache[str, Future[str]] = TTLCache(maxsize=1024, ttl=60 * 60 * 24)
 
     @classmethod
     def set_cache(cls, maxsize: int, ttl: int):
@@ -14,7 +15,7 @@ class Cache:
         cls._cache = TTLCache(maxsize=maxsize, ttl=ttl)
 
     @classmethod
-    def get_cache(cls) -> TTLCache[str, int]:
+    def get_cache(cls) -> TTLCache[str, Future[str]]:
         """Get cache."""
         return cls._cache
 

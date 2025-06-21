@@ -10,6 +10,7 @@ Docs references:
 import json
 from os.path import basename, exists
 from typing import Hashable, Literal, cast
+
 from fbtools.official.models.extra.facebook_message_attachment import (
     FbMessageAttachment_Dict,
 )
@@ -22,13 +23,13 @@ from httpx import AsyncClient, HTTPStatusError
 
 from aiofiles import open as asopen
 
-from cachetools import cached
+from cachetools_async import cached  # pyright: ignore[reportUnknownVariableType]
 
 from fbtools.official.utilities.global_instances import Cache
 
 
 def _upload_messenger_attachment_key(
-    attachment: str, attachment_type: str, **_kwargs: Hashable
+    _self: object, attachment: str, attachment_type: str, **_kwargs: Hashable
 ) -> str:
     return f"{attachment}-{attachment_type}"
 

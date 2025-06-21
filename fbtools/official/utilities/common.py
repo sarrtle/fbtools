@@ -8,7 +8,7 @@ from os.path import exists
 from urllib.parse import urlparse
 from aiofiles import open as aopen
 
-from cachetools import cached
+from cachetools_async import cached  # pyright: ignore[reportUnknownVariableType]
 from httpx import AsyncClient, HTTPStatusError, Response
 
 from fbtools.official.utilities.global_instances import Cache, GraphApiVersion
@@ -121,7 +121,6 @@ async def get_attachment_mimetype(
     It supports all kind of attachment like attachment url, local file or an
     attachment id,
     """
-    print("Running get_attachment_mimetype")
     # custom header for anti robots
     headers = {
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:139.0) Gecko/20100101 Firefox/139.0"
