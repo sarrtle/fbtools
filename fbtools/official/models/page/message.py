@@ -11,8 +11,16 @@ import json
 from os.path import basename, exists
 from typing import Hashable, Literal, cast
 
+from pydantic import ValidationError
+
 from fbtools.official.models.extra.facebook_message_attachment import (
     FbMessageAttachment_Dict,
+)
+from fbtools.official.models.extra.facebook_message_template_models import (
+    ButtonTemplatePostBack_Dict,
+    ButtonTemplateWeb_Dict,
+    GenericTemplate_Dict,
+    QuickReplies_Dict,
 )
 from fbtools.official.models.response.facebook_message_response import (
     FacebookMessageResponse,
@@ -235,6 +243,142 @@ class FacebookMessage:
         facebook_message_object = await self._send_api(data)
         return facebook_message_object
 
+    async def send_quick_reply(
+        self, text: str, quick_replies: list[QuickReplies_Dict]
+    ) -> "FacebookMessage":
+        """Send a quick reply to Facebook messenger.
+
+        Args:
+            text: Non-empty message text to send with the quick replies.
+            quick_replies: List of quick replies data.
+
+        Returns:
+            a FacebookMessage object.
+
+        """
+        data: dict[str, object] = {
+            "message": {"text": text, "quick_replies": quick_replies}
+        }
+
+        facebook_message_object = await self._send_api(data)
+        return facebook_message_object
+
+    async def send_generic_template(
+        self, elements: list[GenericTemplate_Dict]
+    ) -> "FacebookMessage":
+        """Send a generic template to Facebook messenger.
+
+        Args:
+            elements: List of generic template data.
+
+        Returns:
+            a FacebookMessage object.
+
+        """
+        data: dict[str, object] = {
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {"template_type": "generic", "elements": elements},
+                }
+            }
+        }
+
+        facebook_message_object = await self._send_api(data)
+        return facebook_message_object
+
+    async def send_button_template(
+        self,
+        text: str,
+        buttons: list[ButtonTemplateWeb_Dict | ButtonTemplatePostBack_Dict],
+    ) -> "FacebookMessage":
+        """Send a button template to Facebook messenger.
+
+        Args:
+            text: Non-empty message text to send with the quick replies.
+            buttons: List of button data.
+
+        Returns:
+            a FacebookMessage object.
+
+        """
+        data: dict[str, object] = {
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "button",
+                        "text": text,
+                        "buttons": buttons,
+                    },
+                }
+            }
+        }
+
+        facebook_message_object = await self._send_api(data)
+        return facebook_message_object
+
+    async def send_media_template(
+        self,
+        attachment: str | FbMessageAttachment_Dict,
+        buttons: list[ButtonTemplatePostBack_Dict | ButtonTemplateWeb_Dict],
+    ) -> "FacebookMessage":
+        """Send a media template to Facebook messenger.
+
+        Notes:
+            on attachment, url must be from Facebook url, like directly from your posts.
+
+        Args:
+            attachment: The media attachment that can be a facebook url, local file, attachment id.
+            buttons: List of button data.
+
+        Returns:
+            a FacebookMessage object.
+
+        """
+        attachment_data = await self._manage_attachment(attachments=attachment)
+
+        # since we only need one data being preprocessed
+        attachment_data = attachment_data[0]
+
+        # we know we are getting a dict of str on this one
+        # so casting will just silence the linter
+        media_type = cast(str, attachment_data["type"])
+        payload = cast(dict[str, str], attachment_data["payload"])
+        attachment_id = payload.get("attachment_id", None)
+        attachment_url = payload.get("url", None)
+
+        element_data: dict[
+            str, str | list[ButtonTemplatePostBack_Dict | ButtonTemplateWeb_Dict]
+        ] = {}
+        element_data["media_type"] = media_type
+
+        if attachment_id:
+            element_data["attachment_id"] = attachment_id
+        elif attachment_url:
+            element_data["url"] = attachment_url
+        else:
+            raise Exception(
+                "Attachment id or url is not found when sending media template."
+            )
+
+        element_data["buttons"] = buttons
+
+        data: dict[str, object] = {
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "media",
+                        "elements": [element_data],
+                    },
+                }
+            }
+        }
+
+        facebook_message_object = await self._send_api(data)
+        return facebook_message_object
+
     # OBJECT CONTROL
     # ----------------------------------------
     def set_response_type(
@@ -264,9 +408,13 @@ class FacebookMessage:
             url=url, json=data, params=params, headers=self._headers
         )
 
-        facebook_message_response_object = FacebookMessageResponse.model_validate(
-            response.json()
-        )
+        try:
+            facebook_message_response_object = FacebookMessageResponse.model_validate(
+                response.json()
+            )
+        except ValidationError as _error:
+            raise Exception("Failed to send message. from this error: " + response.text)
+
         # - sender is now recipient and recipient (the page) is now the sender
         facebook_message_object = FacebookMessage(
             sender=self._recipient,
@@ -403,7 +551,7 @@ class FacebookMessage:
                         "You should use the string method instead. Because handling a local file needs to be uploaded on facebook server."
                     )
 
-                else:
+                elif attachment["source"].startswith("https://"):
                     attachment_data_list.append(
                         {
                             "type": attachment["attachment_type"],
@@ -411,6 +559,10 @@ class FacebookMessage:
                                 "url": attachment["source"],
                             },
                         }
+                    )
+                else:
+                    raise Exception(
+                        "Invalid attachment source. Check if it is really a valid url or a valid local path."
                     )
 
         return attachment_data_list
