@@ -1,7 +1,8 @@
 """Dispatcher decorator to dispatch events."""
 
-from typing import Callable, TypeVar, cast
-from collections.abc import Awaitable
+from operator import itemgetter
+from typing import Callable, TypeVar, TypedDict
+from collections.abc import Coroutine
 
 import asyncio
 
@@ -15,49 +16,83 @@ class BaseEvent:
     pass
 
 
-# ================ Dispatcher Decorator ================
-
-# create a type variable for events that are subclasses of BaseEvent
 Event = TypeVar("Event", bound=BaseEvent)
+Handler = Callable[..., Coroutine[None, None, None]]
 
-# A handler is a callable that takes an event of type EventType and returns an Awaitable[None]
-EventHandler = Callable[[Event], Awaitable[None]]
+
+class HandlerDict(TypedDict):
+    """HandlerDict object."""
+
+    priority: int
+    handlers: list[Handler]
+
+
+HandlerType = dict[type[BaseEvent], list[HandlerDict]]
 
 
 class EventDispatcher:
     """EventDispatcher object."""
 
-    def __init__(self) -> None:
-        """Initialize EventDispatcher."""
-        self._handlers: dict[
-            type[BaseEvent], list[Callable[[BaseEvent], Awaitable[None]]]
-        ] = {}
-        pass
+    def __init__(self):
+        """Initialize the event dispatcher."""
+        self.handlers: HandlerType = {}
 
-    def handle(
-        self, event_type: type[Event]
-    ) -> Callable[[EventHandler[Event]], EventHandler[Event]]:
-        """Register a handler for a given event type."""
+    def register(self, event: type[BaseEvent], priority: int = 0):
+        """Register the function with an event handler.
 
-        def decorator(func: EventHandler[Event]) -> EventHandler[Event]:
-            # cast the handler to one that accepts BaseEvent for storage
-            self._handlers.setdefault(event_type, []).append(
-                cast(Callable[[BaseEvent], Awaitable[None]], func)
-            )
+        Events are event object to be use when the listener is receiving
+        webhook data.
+
+        Priority is the order of the event handlers to be invoked if there are
+        multiple subscribers into one event. Same value of priority will run
+        the handlers at the same time.
+
+        Args:
+            event: The event to register.
+            priority: The priority of the event handler.
+
+        """
+
+        def decorator(func: Callable[[Event], Coroutine[None, None, None]]):
+            # algorithm time
+            event_data = self.handlers.setdefault(event, [])
+
+            # assign priority
+            if event_data:
+                with_priority = False
+                for e in event_data:
+                    if e.get("priority") == priority:
+                        e.get("handlers").append(func)
+                        with_priority = True
+                        continue
+                if not with_priority:
+                    event_data.append({"priority": priority, "handlers": [func]})
+
+            else:
+                event_data.append({"priority": priority, "handlers": [func]})
+            # Sort it now on register to avoid overhead on invocation
+            event_data.sort(key=itemgetter("priority"))
+            # or
+            # event_data.sort(key=lambda x: x["priority"])
+
             return func
 
         return decorator
 
-    async def invoke(self, event: BaseEvent):
-        """Invoke all handlers for a given event type."""
-        handlers = self._handlers.get(type(event), [])
-        tasks: list[Awaitable[None]] = []
-        for handler in handlers:
-            tasks.append(handler(event))
+    async def invoke(self, event: type[BaseEvent]):
+        """Invoke the given event."""
+        handler_list = self.handlers.get(event, [])
 
-        if tasks:
-            await asyncio.gather(*tasks)
+        # sequential run one by one
+        # on priority but if there are the same
+        # priority, then it will run at the same time
+        # asynchronously
+        for handler in handler_list:
+            handlers: list[Handler] = handler.get("handlers")
+            tasks: list[asyncio.Task[None]] = []
+            for task in handlers:
+                tasks.append(asyncio.create_task(task(event)))
+            _ = await asyncio.gather(*tasks)
 
 
-# run importable dispatcher
-fbtools_dispatcher = EventDispatcher()
+official_event_dispatcher = EventDispatcher()
