@@ -37,7 +37,7 @@ class EventDispatcher:
         """Initialize the event dispatcher."""
         self.handlers: HandlerType = {}
 
-    def register(self, event: type[BaseEvent], priority: int = 0):
+    def register(self, event: type[Event], priority: int = 0):
         """Register the function with an event handler.
 
         Events are event object to be use when the listener is receiving
@@ -79,9 +79,9 @@ class EventDispatcher:
 
         return decorator
 
-    async def invoke(self, event: type[BaseEvent]):
+    async def invoke(self, event: BaseEvent):
         """Invoke the given event."""
-        handler_list = self.handlers.get(event, [])
+        handler_list = self.handlers.get(type(event), [])
 
         # sequential run one by one
         # on priority but if there are the same
@@ -90,6 +90,7 @@ class EventDispatcher:
         for handler in handler_list:
             handlers: list[Handler] = handler.get("handlers")
             tasks: list[asyncio.Task[None]] = []
+            # TODO: Error handling
             for task in handlers:
                 tasks.append(asyncio.create_task(task(event)))
             _ = await asyncio.gather(*tasks)
