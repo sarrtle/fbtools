@@ -57,6 +57,7 @@ class FacebookFeed(BaseModel):
         | FeedNewPost
         | FeedNewPostWithPhoto
         | FeedNewPostWithManyPhotos
+        | FeedNewPostWithVideo
         | FeedComment
         | FeedCommentWithPhoto
         | FeedCommentWithVideo

@@ -129,15 +129,9 @@ class Listener:
                             return
                         self.cache[key] = True
 
-            print(page_object.object)
-            print(page_object.entry)
             # print("--- RAW DATA ---")
             # print(json.dumps(await request.json(), indent=4))
-
-        # handling events
-        # async def handle_webhook_events(payload: UserWebhookBody | PageWebhookBody):
-        #     print(payload.object)
-        #     raise NotImplementedError
+            await self._handle_page_events(page_object)
 
         # async def handle_webhook_events(request: Request):
         #     print(dumps(await request.json(), indent=4))
@@ -183,3 +177,10 @@ class Listener:
 
         # start the listener
         uvicorn.run(self.app, host=self.host, port=self.port)
+
+    # PRIVATE methods
+    # -------------------------
+    # handling events
+    async def _handle_page_events(self, page_object: Page) -> None:
+        print(page_object.object)
+        print(page_object.entry)
