@@ -1,5 +1,6 @@
 """Model object for webhook parameters."""
 
+from typing import cast
 from fastapi import Query
 from pydantic import BaseModel
 
@@ -7,6 +8,6 @@ from pydantic import BaseModel
 class WebhookParams(BaseModel):
     """Parameters for webhook."""
 
-    mode: str = Query(..., alias="hub.mode")
-    token: str = Query(..., alias="hub.verify_token")
-    challenge: str = Query(..., alias="hub.challenge")
+    mode: str = cast(str, Query(..., alias="hub.mode"))
+    token: str = cast(str, Query(..., alias="hub.verify_token"))
+    challenge: str = cast(str, Query(..., alias="hub.challenge"))

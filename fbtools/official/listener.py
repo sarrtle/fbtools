@@ -4,8 +4,9 @@ Webhook events are those from messenger, page events and even
 user events that are connected or used your apps.
 """
 
+import asyncio
 from hashlib import blake2b
-from typing import Annotated, Callable
+from typing import Annotated, Callable, cast
 from fastapi import FastAPI, HTTPException, Query, Request, status
 
 from concurrent.futures import ThreadPoolExecutor
@@ -13,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, PlainTextResponse
 
+from fbtools.official.events.handler import handle_feed_event, handle_message_event
 from fbtools.official.models.listener.webhoook_parameters import (
     WebhookParams,
 )
@@ -21,7 +23,9 @@ from fbtools.official.models.listener.webhoook_parameters import (
 import uvicorn
 
 from fbtools.official.models.listener.page.feeds.feed import FeedNewPostWithPhoto
-from fbtools.official.models.listener.page.page import Page, PageEntry
+from fbtools.official.models.listener.page.page import MessageEntry, Page, PageEntry
+
+from fbtools.official.page import Page as FacebookPage
 
 import json
 
@@ -44,6 +48,7 @@ class Listener:
 
     def __init__(
         self,
+        page_or_token: str | FacebookPage,
         verify_token: str,
         app: FastAPI | None,
         host: str,
@@ -53,6 +58,7 @@ class Listener:
         """Initialize Listener.
 
         Args:
+            page_or_token: The page access token.
             verify_token: The verify token for webhook events.
             app: The existing FastAPI app. Ignore if you are using listener as a standalone.
             host: The host for the FastAPI server.
@@ -61,6 +67,7 @@ class Listener:
 
         """
         # attributes
+        self.page_or_token: FacebookPage | str = page_or_token
         self.verify_token: str = verify_token
         self.app: FastAPI = app or FastAPI()
         self.host: str = host
@@ -96,7 +103,7 @@ class Listener:
             return PlainTextResponse(webhook_params.challenge)
 
         # handling events
-        async def handle_webhook_events(page_object: Page, request: Request):
+        async def handle_webhook_events(page_object: Page, _request: Request):
 
             # handle edited event for profile picture when
             # someone is commenting to the profile picture post
@@ -129,15 +136,7 @@ class Listener:
                             return
                         self.cache[key] = True
 
-            # print("--- RAW DATA ---")
-            # print(json.dumps(await request.json(), indent=4))
             await self._handle_page_events(page_object)
-
-        # async def handle_webhook_events(request: Request):
-        #     print(dumps(await request.json(), indent=4))
-        #     print()
-        #     print("---")
-        #     print()
 
         # handle error for debugging response
         async def validation_exception_handler(request: Request, exc: Exception):
@@ -175,12 +174,29 @@ class Listener:
                 "Listener is not an internal app. Consider add your FastAPI `app` into the listener's parameter."
             )
 
+        if isinstance(self.page_or_token, str):
+            print("Found token: Logging in to Facebook Page...")
+            self.page_or_token = asyncio.run(
+                FacebookPage.from_access_token(self.page_or_token)
+            )
+            print("Found token: Logging in to Facebook Page [DONE]")
+
         # start the listener
         uvicorn.run(self.app, host=self.host, port=self.port)
 
     # PRIVATE methods
     # -------------------------
     # handling events
-    async def _handle_page_events(self, page_object: Page) -> None:
-        print(page_object.object)
-        print(page_object.entry)
+    async def _handle_page_events(self, webhook_page_object: Page) -> None:
+        # print(page_object.entry)
+        if isinstance(webhook_page_object.entry[0], PageEntry):
+            handle_feed_event(
+                webhook_page_object=webhook_page_object,
+                page_object=cast(FacebookPage, self.page_or_token),
+            )
+
+        if isinstance(webhook_page_object.entry[0], MessageEntry):
+            handle_message_event(
+                webhook_page_object=webhook_page_object,
+                page_object=cast(FacebookPage, self.page_or_token),
+            )

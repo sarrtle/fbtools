@@ -22,6 +22,7 @@ from fbtools.official.models.extra.facebook_message_template_models import (
     GenericTemplate_Dict,
     QuickReplies_Dict,
 )
+from fbtools.official.models.listener.page.messaging.models import Attachment
 from fbtools.official.models.response.facebook_message_response import (
     FacebookMessageResponse,
 )
@@ -49,8 +50,10 @@ class FacebookMessage:
         self,
         sender: str,
         recipient: str,
-        timestamp: int,
+        text: str | None,
         message_id: str,
+        attachments: list[Attachment],
+        timestamp: int,
         session: AsyncClient,
         access_token: str,
         user_id: str | Literal["me"] = "me",
@@ -60,8 +63,10 @@ class FacebookMessage:
         Args:
             sender: The sender id
             recipient: The recipient id
-            timestamp: The timestamp of the message
+            text: The text of the message
             message_id: The message id
+            attachments: The attachments of the message
+            timestamp: The timestamp of the message
             session: The httpx async session object
             access_token: The page access token
             user_id: The user id or "me". The "me" is used on dev mode.
@@ -70,7 +75,10 @@ class FacebookMessage:
         # important variables
         self._sender: str = sender
         self._recipient: str = recipient
+        self._text: str | None = text
+        self._message_id: str = message_id
         self._timestamp: int = timestamp
+        self._attachments: list[Attachment] = attachments
 
         # important inner variables
         self._user_id: str = user_id
@@ -379,6 +387,38 @@ class FacebookMessage:
         facebook_message_object = await self._send_api(data)
         return facebook_message_object
 
+    # PROPERTY
+    # ----------------------------------------
+    @property
+    def sender(self) -> str:
+        """The `psid` of the sender."""
+        return self._sender
+
+    @property
+    def recipient(self) -> str:
+        """The `id` of the recipient."""
+        return self._recipient
+
+    @property
+    def text(self) -> str | None:
+        """The text of the message."""
+        return self._text
+
+    @property
+    def message_id(self) -> str:
+        """The message id of the message."""
+        return self._message_id
+
+    @property
+    def timestamp(self) -> int:
+        """The timestamp of the message."""
+        return self._timestamp
+
+    @property
+    def attachments(self) -> list[Attachment]:
+        """The attachments of the message."""
+        return self._attachments
+
     # OBJECT CONTROL
     # ----------------------------------------
     def set_response_type(
@@ -419,6 +459,8 @@ class FacebookMessage:
         facebook_message_object = FacebookMessage(
             sender=self._recipient,
             recipient=self._sender,
+            text=self._text,
+            attachments=self._attachments,
             # TODO: Do accurate timestamp, probably using datetime
             timestamp=self._timestamp,
             message_id=facebook_message_response_object.message_id,
