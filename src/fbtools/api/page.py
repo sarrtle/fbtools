@@ -323,7 +323,7 @@ class Page:
             params = {"access_token": self._access_token, "fields": "status"}
 
             # wait for the video to be published
-            while True:
+            while True and wait_published:
                 response = await self._session.get(vsp.video_id, params=params)
 
                 video_upload_status = VideoUploadStatus.model_validate(response.json())
