@@ -1,0 +1,36 @@
+[project]
+name = "fbtools"
+version = "0.1.0"
+description = "Facebook automation api."
+readme = "README.md"
+authors = [
+  { name = "Sarrtle" }
+]
+
+license-files = [
+  "LICENSE"
+]
+
+requires-python = ">=3.13"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "cachetools>=7.0.5",
+    "httpx>=0.28.1",
+    "pydantic>=2.12.5",
+]
+
+[dependency-groups]
+dev = [
+    "mypy>=1.20.1",
+    "setuptools>=82.0.1",
+]
+
+[build-system]
+requires = ["setuptools>=82.0.1"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.package-data]
+motify = ["**/**.pyi", "py.typed"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
