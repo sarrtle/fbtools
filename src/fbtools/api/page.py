@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import Coroutine
 from pathlib import Path
 from typing import Callable, Literal
+from fbtools.api.post import FacebookPost
 from fbtools.models.page.feed_id_response import FeedIdResponse
 from fbtools.models.page.feed_post_upload import AttachedMedia, FeedPostUploadData
 from fbtools.models.page.id_response import IdResponse
@@ -65,7 +66,7 @@ class Page:
         message: str,
         images: str | list[str] | None = None,
         user_id: str | Literal["me"] = "me",
-    ):
+    ) -> FacebookPost:
         """Create a feed post.
 
         You can create a text post and an image post.
@@ -108,7 +109,11 @@ class Page:
 
         id_response = IdResponse.model_validate(response.json())
 
-        return id_response.id
+        return FacebookPost(
+            post_id=id_response.id,
+            access_token=self._access_token,
+            session=self._session,
+        )
 
     async def create_video_post(
         self,
@@ -129,7 +134,7 @@ class Page:
             | None
         ) = None,
         wait_published: bool = True,
-    ) -> str:
+    ) -> FacebookPost:
         """Create a video post.
 
         You can't upload multiple videos at once, you can't mix
@@ -196,7 +201,11 @@ class Page:
 
             feed_id = FeedIdResponse.model_validate(response.json()).post_id
 
-            return feed_id
+            return FacebookPost(
+                post_id=feed_id,
+                access_token=self._access_token,
+                session=self._session,
+            )
 
         else:
 
@@ -367,7 +376,11 @@ class Page:
 
             response_data = FeedIdResponse.model_validate(response.json())
 
-            return response_data.post_id
+            return FacebookPost(
+                post_id=response_data.post_id,
+                access_token=self._access_token,
+                session=self._session,
+            )
 
     # ===============================================================
     # PROPERTIES
